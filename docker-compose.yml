@@ -1,0 +1,82 @@
+# AI Job-CV Matching Agent — local dev / portfolio deployment
+#
+# Bring everything up:
+#     make docker-up         (uses default 3000 / 8000)
+#     make docker-up-auto    (auto-picks free ports if defaults are taken)
+#
+# Override ports manually:
+#     FRONTEND_PORT=3001 BACKEND_PORT=8001 docker compose up --build
+#
+# Backend → http://localhost:${BACKEND_PORT:-8000}    (Swagger at /docs)
+# Frontend → http://localhost:${FRONTEND_PORT:-3000}
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: ai-job-cv-matcher-backend
+    container_name: ai-job-cv-backend
+    restart: unless-stopped
+    ports:
+      # host:container — only the host side is configurable; the
+      # container always serves on 8000 internally.
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      # SQLite + uploads + FAISS index live under /data (mounted volume).
+      APP_DB_URL: sqlite:////data/app.db
+      APP_INDEX_DIR: /data/index
+      # CORS origin must match the host URL the browser actually hits.
+      # When you change FRONTEND_PORT, also set BACKEND_CORS_ORIGINS to match
+      # (the auto-picker script does this for you).
+      APP_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost:3000}
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
+
+      # Optional LLM extraction (off by default).
+      USE_LLM_EXTRACTION: ${USE_LLM_EXTRACTION:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+
+      # Embeddings — model is downloaded into HF_HOME on first run.
+      APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+    volumes:
+      # Persists DB, uploaded CVs, parsed JSON, FAISS index across restarts.
+      - backend_data:/data
+      # Cache HF model downloads so cold starts after the first one are fast.
+      - hf_cache:/data/hf_cache
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Baked into the client bundle at build time.
+        # When you change BACKEND_PORT, also set NEXT_PUBLIC_API_URL to
+        # match (the auto-picker script does this for you).
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    image: ai-job-cv-matcher-frontend
+    container_name: ai-job-cv-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  backend_data:    # SQLite + uploads + FAISS index
+  hf_cache:        # sentence-transformers model cache

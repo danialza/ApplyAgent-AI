@@ -1,0 +1,18 @@
+# Ship only what the runtime needs.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.env.local
+.pytest_cache/
+.mypy_cache/
+
+# Local data & artefacts — populated at runtime via the mounted volume.
+data/
+*.db
+*.sqlite
+
+# Tests are not needed inside the image.
+tests/

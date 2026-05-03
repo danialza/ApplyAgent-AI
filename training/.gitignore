@@ -1,0 +1,21 @@
+# Never commit private CVs / scraped JDs / processed datasets that may
+# contain personal data. The synthetic/ folder is the only exception and
+# is checked in deliberately.
+data/raw/**
+!data/raw/.gitkeep
+
+data/processed/**
+!data/processed/.gitkeep
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Common training artefacts
+*.lora
+*.safetensors
+*.bin
+*.gguf
+checkpoints/
+runs/
+wandb/
