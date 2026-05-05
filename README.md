@@ -421,6 +421,9 @@ Base URL: `/api`
 | POST   | `/tailor`                  | Pick best CV + structured tailoring suggestions for one job description    |
 | POST   | `/agent/run`               | End-to-end pipeline: profile → tags → discover → rank → tailor             |
 | POST   | `/generate`                | CV suggestions + cover letter + LinkedIn message (LLM polish optional)     |
+| GET    | `/cv/library`              | Read the editable CV library                                                |
+| PUT    | `/cv/library`              | Replace the CV library                                                      |
+| POST   | `/cv/render`               | Render a JD-tailored LaTeX CV (and PDF when `tectonic` is available)        |
 
 Full Swagger UI at `/docs` once the backend is running.
 

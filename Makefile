@@ -36,13 +36,17 @@ test: ## Run all backend test suites.
 		test_llm_extraction test_app_startup test_profile_service \
 		test_query_builder test_job_discovery test_rank_jobs \
 		test_tailor test_agent test_job_from_file test_generate \
-		test_e2e; do \
+		test_cv_renderer test_e2e; do \
 		echo "=== $$t ==="; python3 -m tests.$$t || exit 1; \
 	done
 
 .PHONY: seed
 seed: ## Insert two synthetic demo CVs into the backend DB.
 	cd backend && python3 -m scripts.seed_demo_data
+
+.PHONY: seed-cv
+seed-cv: ## Seed the CV library (header, projects, publications, etc.) for the renderer.
+	cd backend && python3 -m scripts.seed_cv_library
 
 .PHONY: eval
 eval: ## Run extraction + matching evaluators on the synthetic gold set.

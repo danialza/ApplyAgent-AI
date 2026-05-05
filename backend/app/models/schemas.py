@@ -390,6 +390,106 @@ class GenerateRequest(BaseModel):
     polish_with_llm: bool = True
 
 
+## ---------- CV Library + LaTeX renderer ----------
+
+class CVHeader(BaseModel):
+    """Personal header line — name + contact bits shown at the top of the CV."""
+    name: str = ""
+    location: str = ""
+    email: str = ""
+    phone: str = ""
+    website: str = ""
+    linkedin: str = ""
+    github: str = ""
+
+
+class SkillGroup(BaseModel):
+    """One labelled bucket in the Skills section, e.g. 'Languages: Python, SQL'."""
+    label: str
+    items: list[str] = Field(default_factory=list)
+
+
+class EducationEntry(BaseModel):
+    institution: str
+    degree: str
+    period: str = ""
+    highlights: list[str] = Field(default_factory=list)
+
+
+class ProjectEntry(BaseModel):
+    """Reusable project entry. Tags drive JD-fit ranking during tailoring."""
+    title: str
+    period: str = ""
+    highlights: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+
+class ExperienceEntryLib(BaseModel):
+    """Renamed to avoid clashing with the unified-profile `WorkExperienceEntry`."""
+    title: str
+    company: str = ""
+    period: str = ""
+    highlights: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+
+class PublicationEntry(BaseModel):
+    title: str
+    status: str = ""  # e.g. "Under Submission", "Accepted", "Published"
+    venue: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
+class CertificationEntry(BaseModel):
+    issuer: str = ""
+    name: str
+    tags: list[str] = Field(default_factory=list)
+
+
+class CVLibraryBase(BaseModel):
+    header: CVHeader = Field(default_factory=CVHeader)
+    summary: str = ""
+    skills_groups: list[SkillGroup] = Field(default_factory=list)
+    education: list[EducationEntry] = Field(default_factory=list)
+    selected_projects: list[ProjectEntry] = Field(default_factory=list)
+    additional_projects: list[ProjectEntry] = Field(default_factory=list)
+    experience: list[ExperienceEntryLib] = Field(default_factory=list)
+    publications: list[PublicationEntry] = Field(default_factory=list)
+    certifications: list[CertificationEntry] = Field(default_factory=list)
+    languages: list[str] = Field(default_factory=list)
+
+
+class CVLibraryOut(CVLibraryBase):
+    id: int = 1
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RenderCVRequest(BaseModel):
+    """Render a tailored CV.
+
+    `job_text` drives the section selection + bolding. When omitted the
+    renderer produces an unfiltered "master" CV using everything in the
+    library. `compile_pdf` triggers tectonic if available.
+    """
+    job_text: str = ""
+    compile_pdf: bool = False
+    # Caps applied per section after JD-relevance ranking.
+    max_selected_projects: int = Field(default=4, ge=0, le=20)
+    max_additional_projects: int = Field(default=3, ge=0, le=20)
+    max_experience: int = Field(default=4, ge=0, le=20)
+
+
+class RenderCVResponse(BaseModel):
+    latex: str
+    pdf_b64: str = ""
+    compiled: bool = False
+    compile_error: str = ""
+    sections_chosen: dict[str, list[str]] = Field(default_factory=dict)
+    matched_skills: list[str] = Field(default_factory=list)
+
+
 class GenerateResponse(BaseModel):
     cv_suggestions: str = ""
     cover_letter: str = ""

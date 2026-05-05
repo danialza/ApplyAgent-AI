@@ -87,3 +87,35 @@ class UserProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
+
+
+class CVLibrary(Base):
+    """User-curated library of CV material — beyond any single uploaded CV.
+
+    The renderer picks subsets of this material per JD to produce a tailored
+    LaTeX CV. Single-row table for the MVP (id fixed at 1).
+    """
+    __tablename__ = "cv_library"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+
+    # Personal header — name + contact line.
+    header: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    # Skills as ordered category buckets, e.g.
+    #   [{"label": "Languages", "items": ["Python", "SQL", ...]}, ...]
+    skills_groups: Mapped[list[Any]] = mapped_column(JSON, default=list)
+
+    # All entries below are list[dict] with a stable shape — see schemas.py.
+    education: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    selected_projects: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    additional_projects: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    experience: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    publications: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    certifications: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    languages: Mapped[list[Any]] = mapped_column(JSON, default=list)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )

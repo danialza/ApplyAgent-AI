@@ -6,6 +6,9 @@ pydantic>=2.6
 pdfplumber>=0.11
 python-docx>=1.1
 
+# LaTeX templating for the tailored-CV renderer.
+jinja2>=3.1
+
 # Job-URL scraping
 httpx>=0.27
 beautifulsoup4>=4.12

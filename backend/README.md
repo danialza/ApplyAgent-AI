@@ -97,6 +97,9 @@ Base path: `/api`
 | POST   | `/api/tailor`           | `{ "job_text": "...", "cv_ids"?, "use_profile_fallback"? }` | Pick best CV + structured tailoring suggestions |
 | POST   | `/api/agent/run`        | `{ "sources"?, "max_discover"?, "max_rank"?, "max_tailor"?, "cv_ids"?, "use_profile_fallback"?, "queries"?, "tags"? }` | End-to-end pipeline: profile → tags → discover → rank → tailor |
 | POST   | `/api/generate`         | `{ "job_text": "...", "kinds": ["cv_suggestions","cover_letter","linkedin_message"], "cv_ids"?, "use_profile_fallback"?, "polish_with_llm"? }` | Produce CV suggestions, cover letter, LinkedIn message |
+| GET    | `/api/cv/library`       | —                                      | Fetch the editable CV library (header, projects, publications, …) |
+| PUT    | `/api/cv/library`       | `CVLibraryBase`                        | Replace the singleton CV library                                  |
+| POST   | `/api/cv/render`        | `{ "job_text"?, "compile_pdf"?, "max_*"? }` | Render a tailored LaTeX CV (and PDF if `tectonic`/`pdflatex` available) |
 | POST   | `/api/profile/build`    | `multipart/form-data` field `files[]` (optional) | Persist any uploaded PDF/DOCX/TXT documents, then build the unified profile across all CVs + Documents |
 | GET    | `/api/profile`          | —                                      | Return the current unified profile (404 if not built) |
 | DELETE | `/api/profile`          | —                                      | Delete the unified profile + supplementary docs (CVs preserved) |
@@ -1091,6 +1094,91 @@ Selected fields from the response:
   "used_profile_fallback": false
 }
 ```
+
+## Tailored LaTeX CV renderer
+
+Three endpoints that together let you maintain a single source of truth
+for your CV and produce a JD-tailored `.tex` (and optionally `.pdf`) per
+job application.
+
+### Library shape
+
+```jsonc
+{
+  "header":   { "name": "...", "location": "...", "email": "...",
+                "phone": "...", "website": "...", "linkedin": "...", "github": "..." },
+  "summary":  "Applied AI engineer with…",
+  "skills_groups": [
+    { "label": "Languages",        "items": ["Python", "SQL", "..."] },
+    { "label": "LLM / Applied AI", "items": ["RAG", "prompt engineering", "..."] }
+  ],
+  "education":          [ { "institution": "...", "degree": "...", "period": "...", "highlights": ["..."] } ],
+  "selected_projects":  [ { "title": "...", "period": "...", "tags": ["Python","RAG"], "highlights": ["..."] } ],
+  "additional_projects":[ { ...same shape... } ],
+  "experience":         [ { "title": "...", "company": "...", "period": "...", "tags": [], "highlights": [] } ],
+  "publications":       [ { "title": "...", "status": "Under Submission", "venue": "", "tags": [] } ],
+  "certifications":     [ { "issuer": "Microsoft", "name": "Azure AI-900", "tags": ["Azure"] } ],
+  "languages":          [ "English: Professional", "Farsi: Native" ]
+}
+```
+
+The `tags` array on every entry drives JD-fit ranking. Add more
+projects, publications, etc. than you'd ever fit on one CV — the
+renderer picks the best subset per job.
+
+### Rendering pipeline
+
+For each `POST /api/cv/render`:
+
+1. Parse the JD via the existing rule-based parser → canonical skills.
+2. Rank `selected_projects`, `additional_projects`, `experience`,
+   `publications`, `certifications` by `tag` overlap with the JD.
+3. Truncate each section to the configurable cap (`max_selected_projects`
+   default 4, `max_additional_projects` 3, `max_experience` 4).
+4. Re-order `skills_groups` so categories with JD-matched items come first.
+5. Bold every JD-matched skill (and its synonyms) inside bullet text
+   using `\textbf{…}` — boundary-aware, never wraps inside an existing
+   bold, ignores ultra-short aliases (≥ 3 chars only).
+6. Fill the LaTeX template (charter font, 0.5 cm margins, hrulefill
+   section rules — identical to the user's original layout).
+7. If `compile_pdf=true` and a compiler is available, also run
+   `tectonic` (preferred — single binary) or `pdflatex` and return the
+   PDF as base64.
+
+### Setup
+
+```bash
+# Seed the bundled sample (Danial's CV) once after first boot.
+make seed-cv
+
+# Then render a tailored CV.
+curl -X POST http://localhost:8000/api/cv/render \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "job_text": "Senior AI Engineer at Cortex Labs. Required: Python, FastAPI, RAG, FAISS.",
+    "max_selected_projects": 3,
+    "compile_pdf": true
+  }' | jq -r '.latex' > tailored.tex
+```
+
+### PDF compilation
+
+The Docker image bakes in `tectonic` (single-binary LaTeX, no TeX Live
+install needed). On first compile inside the container, tectonic
+downloads the required packages and caches them — subsequent renders
+are fast.
+
+For local dev (without Docker):
+
+```bash
+brew install tectonic            # macOS
+# or:
+sudo apt-get install texlive-latex-extra texlive-fonts-extra
+```
+
+If neither compiler is on PATH, the endpoint still returns the LaTeX
+string and a `compile_error` explaining what to install — never errors
+out.
 
 ## Future work
 

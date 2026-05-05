@@ -41,6 +41,9 @@ EXPECTED_ROUTES: set[tuple[str, str]] = {
     ("POST",   "/api/tailor"),
     ("POST",   "/api/agent/run"),
     ("POST",   "/api/generate"),
+    ("GET",    "/api/cv/library"),
+    ("PUT",    "/api/cv/library"),
+    ("POST",   "/api/cv/render"),
 }
 
 

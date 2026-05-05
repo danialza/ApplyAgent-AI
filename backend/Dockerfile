@@ -12,10 +12,26 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # OS deps:
 # - curl: HEALTHCHECK
 # - libgomp1, build-essential: needed by faiss-cpu / numpy / pdfplumber on slim
+# - ca-certificates, libfontconfig1: tectonic (LaTeX compiler) deps
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         curl libgomp1 build-essential \
+        ca-certificates libfontconfig1 \
     && rm -rf /var/lib/apt/lists/*
+
+# Tectonic: a single-binary LaTeX compiler used by the tailored-CV
+# renderer (POST /api/cv/render with compile_pdf=true). ~30 MB; pulls
+# additional TeX packages on first compile and caches them.
+ARG TECTONIC_VERSION=0.15.0
+RUN ARCH=$(dpkg --print-architecture) \
+    && case "$ARCH" in \
+         amd64) TECTONIC_ARCH="x86_64-unknown-linux-musl" ;; \
+         arm64) TECTONIC_ARCH="aarch64-unknown-linux-musl" ;; \
+         *) echo "unsupported arch: $ARCH" && exit 1 ;; \
+       esac \
+    && curl -fsSL "https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic@${TECTONIC_VERSION}/tectonic-${TECTONIC_VERSION}-${TECTONIC_ARCH}.tar.gz" \
+       | tar -xz -C /usr/local/bin tectonic \
+    && tectonic --version
 
 WORKDIR /app
 
