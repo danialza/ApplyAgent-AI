@@ -6,10 +6,13 @@ import type {
   AgentRunResponse,
   BatchMatchResponse,
   CV,
+  CVLibrary,
   JobFileResponse,
   JobUrlResponse,
   QueryBuilderResponse,
   RankedMatchResponse,
+  RenderCVRequest,
+  RenderCVResponse,
 } from "./types";
 
 const API_BASE =
@@ -127,6 +130,32 @@ export async function runAgent(body: AgentRunRequest = {}): Promise<AgentRunResp
     body: JSON.stringify(body),
   });
   return handle<AgentRunResponse>(res);
+}
+
+// ---------- CV library + tailored renderer ----------
+
+export async function fetchCVLibrary(): Promise<CVLibrary | null> {
+  const res = await fetch(`${API_BASE}/api/cv/library`, { cache: "no-store" });
+  if (res.status === 404) return null;
+  return handle<CVLibrary>(res);
+}
+
+export async function putCVLibrary(payload: Omit<CVLibrary, "id" | "updated_at">): Promise<CVLibrary> {
+  const res = await fetch(`${API_BASE}/api/cv/library`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<CVLibrary>(res);
+}
+
+export async function renderCV(body: RenderCVRequest): Promise<RenderCVResponse> {
+  const res = await fetch(`${API_BASE}/api/cv/render`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<RenderCVResponse>(res);
 }
 
 export { ApiError, API_BASE };

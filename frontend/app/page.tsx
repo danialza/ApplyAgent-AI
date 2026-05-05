@@ -7,6 +7,7 @@ import ErrorMessage from "@/components/ErrorMessage";
 import LoadingState from "@/components/LoadingState";
 import ManualJobInput from "@/components/ManualJobInput";
 import MatchResults from "@/components/MatchResults";
+import TailoredCVPanel from "@/components/TailoredCVPanel";
 import UploadedCVList from "@/components/UploadedCVList";
 import { listCVs, matchAll } from "@/lib/api";
 import type { CV, RankedMatchResponse } from "@/lib/types";
@@ -147,6 +148,19 @@ export default function HomePage() {
               : undefined
           }
         />
+      </section>
+
+      <section className="card space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">5. Tailored CV (LaTeX → PDF)</h2>
+          <p className="text-sm text-slate-500">
+            Maintain a single source of truth for your CV — projects,
+            publications, certifications. Per job, the renderer picks the
+            best subset, bolds matched skills, and produces a one-page
+            LaTeX/PDF in your preferred format.
+          </p>
+        </div>
+        <TailoredCVPanel onError={setError} />
       </section>
 
       <footer className="pt-6 text-center text-xs text-slate-400">

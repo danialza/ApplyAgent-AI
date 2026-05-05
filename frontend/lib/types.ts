@@ -236,6 +236,90 @@ export interface QueryBuilderResponse {
   tags: QueryTagSet;
 }
 
+// ---------- Tailored LaTeX CV renderer ----------
+
+export interface CVHeader {
+  name: string;
+  location: string;
+  email: string;
+  phone: string;
+  website: string;
+  linkedin: string;
+  github: string;
+}
+
+export interface SkillGroup {
+  label: string;
+  items: string[];
+}
+
+export interface EducationEntryLib {
+  institution: string;
+  degree: string;
+  period: string;
+  highlights: string[];
+}
+
+export interface ProjectEntry {
+  title: string;
+  period: string;
+  highlights: string[];
+  tags: string[];
+}
+
+export interface ExperienceEntryLib {
+  title: string;
+  company: string;
+  period: string;
+  highlights: string[];
+  tags: string[];
+}
+
+export interface PublicationEntry {
+  title: string;
+  status: string;
+  venue: string;
+  tags: string[];
+}
+
+export interface CertificationEntry {
+  issuer: string;
+  name: string;
+  tags: string[];
+}
+
+export interface CVLibrary {
+  id: number;
+  header: CVHeader;
+  summary: string;
+  skills_groups: SkillGroup[];
+  education: EducationEntryLib[];
+  selected_projects: ProjectEntry[];
+  additional_projects: ProjectEntry[];
+  experience: ExperienceEntryLib[];
+  publications: PublicationEntry[];
+  certifications: CertificationEntry[];
+  languages: string[];
+  updated_at: string;
+}
+
+export interface RenderCVRequest {
+  job_text?: string;
+  compile_pdf?: boolean;
+  max_selected_projects?: number;
+  max_additional_projects?: number;
+  max_experience?: number;
+}
+
+export interface RenderCVResponse {
+  latex: string;
+  pdf_b64: string;
+  compiled: boolean;
+  compile_error: string;
+  sections_chosen: Record<string, string[]>;
+  matched_skills: string[];
+}
+
 export interface AgentRunResponse {
   steps: AgentStep[];
   profile: UserProfileOut | null;
