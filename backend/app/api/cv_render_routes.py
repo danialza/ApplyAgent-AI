@@ -23,6 +23,7 @@ from app.models.schemas import (
     RenderCVRequest,
     RenderCVResponse,
 )
+from app.services.codex_cv_polish import polish_library_with_llm
 from app.services.cv_renderer import render_cv
 from app.services.extraction import extract_job
 
@@ -99,8 +100,23 @@ def render_tailored_cv(
         parsed = extract_job(payload.job_text)
         job = JobParsed(**parsed.to_dict())
 
+    library_out = _to_out(row)
+    used_llm = False
+    llm_skip_reason = ""
+
+    # Career-ops style LLM polish — only when explicitly requested + the
+    # LLM layer is configured. Failure here is non-fatal; we fall back to
+    # the rule-based renderer with the original library.
+    if payload.use_llm:
+        polished, _bold_keywords, skip = polish_library_with_llm(library_out, job)
+        if polished is not None:
+            library_out = polished
+            used_llm = True
+        else:
+            llm_skip_reason = skip
+
     result = render_cv(
-        _to_out(row),
+        library_out,
         job=job,
         max_selected_projects=payload.max_selected_projects,
         max_additional_projects=payload.max_additional_projects,
@@ -115,4 +131,6 @@ def render_tailored_cv(
         compile_error=result.compile_error,
         sections_chosen=result.sections_chosen,
         matched_skills=result.matched_skills,
+        used_llm=used_llm,
+        llm_skip_reason=llm_skip_reason,
     )

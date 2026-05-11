@@ -309,6 +309,7 @@ export interface RenderCVRequest {
   max_selected_projects?: number;
   max_additional_projects?: number;
   max_experience?: number;
+  use_llm?: boolean;
 }
 
 export interface RenderCVResponse {
@@ -318,6 +319,8 @@ export interface RenderCVResponse {
   compile_error: string;
   sections_chosen: Record<string, string[]>;
   matched_skills: string[];
+  used_llm: boolean;
+  llm_skip_reason: string;
 }
 
 export interface AgentRunResponse {

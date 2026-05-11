@@ -24,6 +24,7 @@ export default function TailoredCVPanel({ onError }: Props) {
   const [maxAdditional, setMaxAdditional] = useState(3);
   const [maxExperience, setMaxExperience] = useState(4);
   const [compilePdf, setCompilePdf] = useState(true);
+  const [useLlm, setUseLlm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<RenderCVResponse | null>(null);
 
@@ -62,11 +63,16 @@ export default function TailoredCVPanel({ onError }: Props) {
         max_selected_projects: maxSelected,
         max_additional_projects: maxAdditional,
         max_experience: maxExperience,
+        use_llm: useLlm,
       });
       setResult(data);
       if (data.compile_error && !data.compiled) {
         // Surface as a soft warning — LaTeX still came through.
         onError(`PDF compile not available: ${data.compile_error}`);
+      }
+      if (useLlm && !data.used_llm && data.llm_skip_reason) {
+        // LLM was requested but skipped — show why so the user can fix env.
+        onError(`LLM polish skipped: ${data.llm_skip_reason}`);
       }
     } catch (err) {
       onError(err instanceof Error ? err.message : "Render failed.");
@@ -189,6 +195,18 @@ export default function TailoredCVPanel({ onError }: Props) {
             className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
           />
           Compile PDF (requires tectonic in container)
+        </label>
+        <label
+          className="flex items-center gap-2 text-xs font-medium text-slate-600"
+          title="Polish bullets + summary with LLM (career-ops style). Requires OPENAI_API_KEY in backend env. Falls back to rule-based on failure."
+        >
+          <input
+            type="checkbox"
+            checked={useLlm}
+            onChange={(e) => setUseLlm(e.target.checked)}
+            className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+          />
+          Polish with LLM
         </label>
         <button
           type="button"
@@ -327,6 +345,11 @@ function ResultPanel({
           ) : (
             <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
               LaTeX only
+            </span>
+          )}
+          {result.used_llm && (
+            <span className="ml-2 rounded-full bg-violet-100 px-2 py-0.5 text-xs text-violet-700">
+              LLM-polished
             </span>
           )}
         </p>

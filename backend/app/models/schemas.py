@@ -479,6 +479,11 @@ class RenderCVRequest(BaseModel):
     max_selected_projects: int = Field(default=4, ge=0, le=20)
     max_additional_projects: int = Field(default=3, ge=0, le=20)
     max_experience: int = Field(default=4, ge=0, le=20)
+    # Career-ops style LLM polish: rewrite Summary + reformulate bullets
+    # using JD vocabulary, then plug the polished content through the
+    # same template. Falls back to the rule-based path on any failure.
+    # Requires USE_LLM_EXTRACTION=true + OPENAI_API_KEY.
+    use_llm: bool = False
 
 
 class RenderCVResponse(BaseModel):
@@ -488,6 +493,8 @@ class RenderCVResponse(BaseModel):
     compile_error: str = ""
     sections_chosen: dict[str, list[str]] = Field(default_factory=dict)
     matched_skills: list[str] = Field(default_factory=list)
+    used_llm: bool = False
+    llm_skip_reason: str = ""
 
 
 class GenerateResponse(BaseModel):
