@@ -33,6 +33,31 @@ from app.utils.text_cleaning import (
 
 # ------- Text extraction -------
 
+_WORD_REFLOW_RE_LU = re.compile(r"(?<=[a-z])(?=[A-Z])")
+_WORD_REFLOW_RE_LD = re.compile(r"(?<=[A-Za-z])(?=\d)")
+_WORD_REFLOW_RE_DL = re.compile(r"(?<=\d)(?=[A-Za-z])")
+
+
+def _reflow_pdf_spaces(text: str) -> str:
+    """Repair word boundaries pdfplumber sometimes collapses.
+
+    Certain PDF fonts/kernings make `extract_text` return runs like
+    'NED3ProDRLSim-to-RealReaching' or 'Co-Founder–Systems&TechnicalLead'.
+    Restore spaces at camelCase, letter→digit, and digit→letter
+    boundaries. Idempotent — running twice produces the same output.
+
+    Trade-off: over-splits a few proper nouns ('FastAPI' → 'Fast API').
+    That's acceptable here — the downstream skill dictionary still
+    matches via aliases, and the readability gain dominates.
+    """
+    if not text:
+        return text
+    text = _WORD_REFLOW_RE_LU.sub(" ", text)
+    text = _WORD_REFLOW_RE_LD.sub(" ", text)
+    text = _WORD_REFLOW_RE_DL.sub(" ", text)
+    return text
+
+
 def extract_text_from_pdf(data: bytes) -> str:
     """Extract text from a PDF byte buffer using pdfplumber."""
     import pdfplumber  # local import — keeps heuristic path dep-free.
@@ -42,7 +67,9 @@ def extract_text_from_pdf(data: bytes) -> str:
         for page in pdf.pages:
             page_text = page.extract_text() or ""
             out.append(page_text)
-    return clean_text("\n".join(out))
+    raw = "\n".join(out)
+    # Repair lost word boundaries before downstream cleaning.
+    return clean_text(_reflow_pdf_spaces(raw))
 
 
 def extract_text_from_docx(data: bytes) -> str:
@@ -104,7 +131,13 @@ class ParsedCV:
     education: list[str] = field(default_factory=list)
     experience: list[str] = field(default_factory=list)
     projects: list[str] = field(default_factory=list)
+    # Split when the CV has BOTH "Selected …" and "Additional …" headers.
+    # When only the generic "Projects" header is present, everything lands
+    # in `projects` and these two stay empty.
+    selected_projects: list[str] = field(default_factory=list)
+    additional_projects: list[str] = field(default_factory=list)
     certifications: list[str] = field(default_factory=list)
+    publications: list[str] = field(default_factory=list)
     languages: list[str] = field(default_factory=list)
 
     # Contact info.
@@ -195,6 +228,28 @@ def _languages_from(sections: dict[str, list[str]]) -> list[str]:
     return split_entries(block)
 
 
+def extract_section_blocks(text: str) -> dict[str, str]:
+    """Return raw line-joined text per section so downstream callers can
+    apply their own header-aware grouping (bullets under role headers,
+    project titles, publication entries, etc.).
+
+    Keyed by canonical section name from `text_cleaning.SECTION_HEADERS`:
+    summary / skills / experience / education / selected_projects /
+    additional_projects / projects / certifications / publications /
+    languages. Empty string when a section is absent.
+
+    Applies the PDF space-reflow before splitting so CVs uploaded under
+    the old extraction path (which sometimes dropped inter-word spaces)
+    still produce useful section blocks.
+    """
+    reflowed = _reflow_pdf_spaces(text or "")
+    cleaned = clean_text(reflowed)
+    if not cleaned:
+        return {k: "" for k in SECTION_HEADERS}
+    sections, _pre = _build_sections(cleaned.split("\n"))
+    return {k: "\n".join(v) for k, v in sections.items()}
+
+
 def parse_cv_text(text: str) -> ParsedCV:
     """Heuristic section parser. Returns a `ParsedCV` dataclass.
 
@@ -227,7 +282,10 @@ def parse_cv_text(text: str) -> ParsedCV:
     parsed.education = split_entries("\n".join(sections["education"]))
     parsed.experience = split_entries("\n".join(sections["experience"]))
     parsed.projects = split_entries("\n".join(sections["projects"]))
+    parsed.selected_projects = split_entries("\n".join(sections.get("selected_projects", [])))
+    parsed.additional_projects = split_entries("\n".join(sections.get("additional_projects", [])))
     parsed.certifications = split_entries("\n".join(sections["certifications"]))
+    parsed.publications = split_entries("\n".join(sections.get("publications", [])))
     parsed.languages = _languages_from(sections)
 
     return parsed

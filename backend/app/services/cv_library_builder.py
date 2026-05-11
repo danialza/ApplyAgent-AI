@@ -40,7 +40,7 @@ from app.models.schemas import (
     PublicationEntry,
     SkillGroup,
 )
-from app.services.cv_parser import parse_cv_text
+from app.services.cv_parser import extract_section_blocks, parse_cv_text
 from app.utils.skill_dictionary import (
     AI_ML_SKILLS,
     ROBOTICS_SKILLS,
@@ -49,11 +49,30 @@ from app.utils.skill_dictionary import (
 )
 
 _YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
+# Optional month prefix and suffix wrapping the year — captures
+# "Oct 2017 – Dec 2024" cleanly while still matching bare "2017–2024".
+_MONTH_RE = (
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+    r"(?:uary|ruary|ch|il|e|y|ust|tember|ober|ember)?"
+)
 _PERIOD_RE = re.compile(
-    r"((?:19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)\d{2}|present|current|now))",
+    rf"((?:{_MONTH_RE}\.?\s*)?(?:19|20)\d{{2}}"
+    rf"\s*[-–—]\s*"
+    rf"(?:(?:{_MONTH_RE}\.?\s*)?(?:19|20)\d{{2}}|present|current|now))",
     re.IGNORECASE,
 )
-_ROLE_SPLIT_RE = re.compile(r"\s+[—–-]\s+|\s+at\s+|\s+@\s+", re.IGNORECASE)
+# Permissive: catches anything between the year markers (months,
+# spaces, dashes). Used for header *detection*.
+_HEADER_PERIOD_RE = re.compile(
+    rf"(?:{_MONTH_RE}\.?\s*)?(?:19|20)\d{{2}}.{{0,20}}?[-–—].{{0,20}}?"
+    rf"(?:(?:{_MONTH_RE}\.?\s*)?(?:19|20)\d{{2}}|present|current|now)",
+    re.IGNORECASE,
+)
+# Prefer em-dash / en-dash over hyphen so "Co-Founder – Company" splits
+# at the right separator, not inside "Co-Founder".
+_ROLE_SPLIT_EM = re.compile(r"\s*[—–]\s*")
+_ROLE_SPLIT_AT = re.compile(r"\s+at\s+|\s+@\s+", re.IGNORECASE)
+_ROLE_SPLIT_HYPHEN = re.compile(r"\s+-\s+")
 
 
 # ---------- Skill bucketing ----------
@@ -102,9 +121,13 @@ def _group_skills(skills: list[str]) -> list[SkillGroup]:
 def _extract_period(text: str) -> tuple[str, str]:
     """Return (period_string, residual_text_with_period_removed)."""
     m = _PERIOD_RE.search(text or "")
+    if m is None:
+        m = _HEADER_PERIOD_RE.search(text or "")
     if not m:
         return "", text
-    period = m.group(1)
+    period = m.group(0) if m.lastindex is None else m.group(1) if hasattr(m, "group") else ""
+    # Use the matched span directly so both regex variants work.
+    period = (text[m.start():m.end()]).strip()
     cleaned = (text[: m.start()] + text[m.end():]).strip(" ,()|;–—-")
     return period, cleaned
 
@@ -113,13 +136,132 @@ def _tags_for(text: str) -> list[str]:
     return find_technical_skills(text)
 
 
+# ---------- Block-level (raw section text) builders ----------
+
+_BULLET_PREFIX = ("-", "*", "•", "·", "–", "—", "►", "▶", "✓", "✔")
+
+
+def _walk_block_grouped(block: str) -> list[tuple[str, list[str]]]:
+    """Yield (header_line, bullet_lines[]) groups from a raw section block.
+
+    A "header line" has a year/period in it AND isn't a bullet. A
+    bullet line starts with a bullet glyph or a hyphen. Non-bullet
+    text between headers attaches to the most-recent header. Useful
+    for projects, experience, and publications where roles/projects
+    don't always have blank-line separators.
+    """
+    groups: list[tuple[str, list[str]]] = []
+    for raw in (block or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        is_bullet = raw.lstrip().startswith(_BULLET_PREFIX)
+        text = line.lstrip("".join(_BULLET_PREFIX) + " \t").strip()
+        if not is_bullet and _HEADER_PERIOD_RE.search(line) and len(line) < 200:
+            groups.append((line, []))
+        else:
+            if not groups:
+                groups.append(("", []))
+            groups[-1][1].append(text)
+    return groups
+
+
+def _projects_from_block(block: str) -> list[ProjectEntry]:
+    """Header-aware project extraction from a raw section block."""
+    out: list[ProjectEntry] = []
+    for header, bullets in _walk_block_grouped(block):
+        period, residual = _extract_period(header) if header else ("", "")
+        title = (residual or header).strip(" ,—–-")[:140] or "Project"
+        highlights: list[str] = []
+        for b in bullets:
+            for s in re.split(r"(?<=[.!?])\s+", b):
+                s = s.strip()
+                if s:
+                    highlights.append(s)
+        out.append(ProjectEntry(
+            title=title,
+            period=period,
+            highlights=highlights[:8],
+            tags=_tags_for(header + " " + " ".join(bullets)),
+        ))
+    return out
+
+
+def _experience_from_block(block: str) -> list[ExperienceEntryLib]:
+    """Header-aware experience extraction. Splits 'Title — Company Period'."""
+    out: list[ExperienceEntryLib] = []
+    for header, bullets in _walk_block_grouped(block):
+        period, residual = _extract_period(header) if header else ("", "")
+        # Try the separators in priority order: em/en-dash first, then
+        # " at ", then bare hyphen (which is risky because role titles
+        # often contain hyphens like "Co-Founder").
+        parts: list[str] = [residual] if residual else [""]
+        for splitter in (_ROLE_SPLIT_EM, _ROLE_SPLIT_AT, _ROLE_SPLIT_HYPHEN):
+            cand = splitter.split(residual or "", maxsplit=1)
+            if len(cand) == 2 and cand[0].strip() and cand[1].strip():
+                parts = cand
+                break
+        if len(parts) == 2:
+            title, company = parts[0].strip(" ,"), parts[1].strip(" ,()")
+        else:
+            # Fall back: comma split with the LAST chunk treated as company.
+            chunks = [c.strip() for c in residual.split(",") if c.strip()]
+            if len(chunks) >= 2:
+                title, company = chunks[0], chunks[-1]
+            else:
+                title, company = (residual or header).strip(), ""
+        if not title:
+            continue
+        highlights: list[str] = []
+        for b in bullets:
+            for s in re.split(r"(?<=[.!?])\s+", b):
+                s = s.strip()
+                if s:
+                    highlights.append(s)
+        out.append(ExperienceEntryLib(
+            title=title[:140],
+            company=company[:140],
+            period=period,
+            highlights=highlights[:8],
+            tags=_tags_for(header + " " + " ".join(bullets)),
+        ))
+    return out
+
+
+def _publications_from_block(block: str) -> list[PublicationEntry]:
+    """Extract one PublicationEntry per non-empty line / bullet in the block."""
+    out: list[PublicationEntry] = []
+    for raw in (block or "").splitlines():
+        line = raw.lstrip("".join(_BULLET_PREFIX) + " \t").strip()
+        if not line or len(line) < 8:
+            continue
+        # "Under Submission: Title …" / "Published: Title …" / bare title.
+        m = re.match(r"(under\s+submission|published|accepted|in\s+review)\s*[:\-]\s*(.+)",
+                     line, re.IGNORECASE)
+        if m:
+            status = m.group(1).title()
+            title = m.group(2).strip()
+        else:
+            status = ""
+            title = line
+        out.append(PublicationEntry(
+            title=title[:240],
+            status=status,
+            venue="",
+            tags=_tags_for(line),
+        ))
+    return out
+
+
 # ---------- Per-section transformers ----------
 
 def _build_education(entries: list[str]) -> list[EducationEntry]:
     out: list[EducationEntry] = []
     for e in entries or []:
         period, residual = _extract_period(e)
-        parts = _ROLE_SPLIT_RE.split(residual, maxsplit=1)
+        parts = _ROLE_SPLIT_EM.split(residual, maxsplit=1)
+        if len(parts) != 2:
+            parts = _ROLE_SPLIT_HYPHEN.split(residual, maxsplit=1)
         if len(parts) == 2:
             institution, degree = parts[0].strip(" ,"), parts[1].strip(" ,")
         else:
@@ -156,7 +298,9 @@ def _build_experience(entries: list[str]) -> list[ExperienceEntryLib]:
     out: list[ExperienceEntryLib] = []
     for header, bullets in groups:
         period, residual = _extract_period(header)
-        parts = _ROLE_SPLIT_RE.split(residual, maxsplit=1)
+        parts = _ROLE_SPLIT_EM.split(residual, maxsplit=1)
+        if len(parts) != 2:
+            parts = _ROLE_SPLIT_HYPHEN.split(residual, maxsplit=1)
         if len(parts) == 2:
             title, company = parts[0].strip(" ,"), parts[1].strip(" ,()")
         else:
@@ -173,25 +317,55 @@ def _build_experience(entries: list[str]) -> list[ExperienceEntryLib]:
 
 
 def _build_projects(entries: list[str]) -> list[ProjectEntry]:
-    """One project per parsed entry. Title = first phrase, rest = highlights."""
-    out: list[ProjectEntry] = []
-    for e in entries or []:
-        e = (e or "").strip()
-        if not e:
+    """Group bullets under header lines.
+
+    Real-world CVs structure projects as:
+
+        Project Title 2025-Present
+        - Did this thing
+        - Then that thing
+
+    `split_entries` yields each of those lines as a separate entry; we
+    group them here by treating any line with a year/period (and no
+    bullet glyph) as a header, then attaching following lines as
+    highlights until the next header.
+    """
+    if not entries:
+        return []
+    groups: list[tuple[str, list[str]]] = []
+    for line in entries:
+        line = (line or "").strip()
+        if not line:
             continue
-        period, residual = _extract_period(e)
-        # Split on first ':' or first '. ' for title vs body.
-        m = re.match(r"(.{4,80}?)[:\.]\s+(.+)$", residual, re.DOTALL)
-        if m:
-            title, body = m.group(1).strip(), m.group(2).strip()
+        # Header: short-ish, has a year token, doesn't read like prose.
+        looks_like_header = (
+            len(line) < 140
+            and _PERIOD_RE.search(line) is not None
+            and "." not in line[:-1]  # full stops imply a sentence
+        )
+        if looks_like_header:
+            groups.append((line, []))
         else:
-            title, body = residual.strip()[:80], residual.strip()
-        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", body) if s.strip()]
+            if not groups:
+                groups.append(("Projects", []))
+            groups[-1][1].append(line)
+
+    out: list[ProjectEntry] = []
+    for header, bullets in groups:
+        period, residual = _extract_period(header)
+        title = residual.strip(" ,—–-")[:140] or "Project"
+        # Split bullet sentences into clean highlights when needed.
+        highlights: list[str] = []
+        for b in bullets:
+            for s in re.split(r"(?<=[.!?])\s+", b):
+                s = s.strip()
+                if s:
+                    highlights.append(s)
         out.append(ProjectEntry(
             title=title,
             period=period,
-            highlights=sentences[:5] if sentences else [body],
-            tags=_tags_for(e),
+            highlights=highlights[:8],
+            tags=_tags_for(header + " " + " ".join(bullets)),
         ))
     return out
 
@@ -207,7 +381,9 @@ def _build_certifications(entries: list[str]) -> list[CertificationEntry]:
         if m:
             issuer, name = m.group(1).strip(), m.group(2).strip()
         else:
-            parts = _ROLE_SPLIT_RE.split(e, maxsplit=1)
+            parts = _ROLE_SPLIT_EM.split(e, maxsplit=1)
+            if len(parts) != 2:
+                parts = _ROLE_SPLIT_HYPHEN.split(e, maxsplit=1)
             if len(parts) == 2:
                 name, issuer = parts[0].strip(), parts[1].strip()
             else:
@@ -264,6 +440,16 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
         db.query(DocumentRow).order_by(DocumentRow.created_at.asc()).all()
     )
 
+    # Pre-compute parsed structures + raw section blocks for every source
+    # up-front so every downstream pass can read them without redoing the
+    # work. Block-aware parsing (header-grouped projects, experience,
+    # publications) needs the raw section text, not the flattened entry
+    # lists `cv.experience` / `cv.projects` carry.
+    parsed_by_cv = {cv.id: parse_cv_text(cv.raw_text or "") for cv in cvs}
+    parsed_by_doc = {d.id: parse_cv_text(d.raw_text or "") for d in docs}
+    blocks_by_cv = {cv.id: extract_section_blocks(cv.raw_text or "") for cv in cvs}
+    blocks_by_doc = {d.id: extract_section_blocks(d.raw_text or "") for d in docs}
+
     # ----- Header: newest CV wins for each field, but never overwrite a
     # populated value with an empty one from an older CV. -----
     header = CVHeader()
@@ -315,39 +501,56 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
                 education.append(e)
 
     # ----- Experience: union, dedup by title+company. -----
+    # Use the raw section block so the bullet-grouping isn't broken by
+    # split_entries' flatten-on-no-blank-line behaviour.
     experience: list[ExperienceEntryLib] = []
     seen_exp: set[str] = set()
     for cv in cvs:
-        for x in _build_experience(list(cv.experience or [])):
+        block = blocks_by_cv[cv.id].get("experience") or ""
+        for x in _experience_from_block(block):
             key = f"{x.title.lower()}|{x.company.lower()}"
             if key not in seen_exp:
                 seen_exp.add(key)
                 experience.append(x)
 
-    # ----- Projects: union from CV.projects + Document text. -----
-    projects: list[ProjectEntry] = []
+    # ----- Projects: prefer the granular split when the CV has both
+    # "Selected …" and "Additional …" headers; else fall back to the
+    # generic `projects` bucket and split by detected-tag density. -----
+    selected_acc: list[ProjectEntry] = []
+    additional_acc: list[ProjectEntry] = []
+    generic_acc: list[ProjectEntry] = []
     seen_proj: set[str] = set()
-    for cv in cvs:
-        for p in _build_projects(list(cv.projects or [])):
-            key = p.title.lower()
-            if key not in seen_proj:
-                seen_proj.add(key)
-                projects.append(p)
-    # Document fallback: if a Document's parsed structure surfaces
-    # project-like entries we missed in CV.projects, pull them in.
-    for d in docs:
-        parsed = parse_cv_text(d.raw_text or "")
-        for p in _build_projects(list(parsed.projects or [])):
-            key = p.title.lower()
-            if key not in seen_proj:
-                seen_proj.add(key)
-                projects.append(p)
 
-    # Top half by detected-tag count → "selected", rest → "additional".
-    projects.sort(key=lambda p: -len(p.tags))
-    half = max(1, len(projects) // 2) if projects else 0
-    selected = projects[:half]
-    additional = projects[half:]
+    def _add_proj(target: list[ProjectEntry], projects: list[ProjectEntry]) -> None:
+        for p in projects:
+            key = p.title.lower()
+            if not key or key in seen_proj:
+                continue
+            seen_proj.add(key)
+            target.append(p)
+
+    for cv in cvs:
+        blocks = blocks_by_cv[cv.id]
+        _add_proj(selected_acc,    _projects_from_block(blocks.get("selected_projects", "")))
+        _add_proj(additional_acc,  _projects_from_block(blocks.get("additional_projects", "")))
+        _add_proj(generic_acc,     _projects_from_block(blocks.get("projects", "")))
+    for d in docs:
+        blocks = blocks_by_doc[d.id]
+        _add_proj(selected_acc,    _projects_from_block(blocks.get("selected_projects", "")))
+        _add_proj(additional_acc,  _projects_from_block(blocks.get("additional_projects", "")))
+        _add_proj(generic_acc,     _projects_from_block(blocks.get("projects", "")))
+
+    if selected_acc or additional_acc:
+        # CV provided explicit split — respect it. Generic projects join
+        # `additional` so nothing is lost.
+        selected = selected_acc
+        additional = additional_acc + generic_acc
+    else:
+        # Fall back: split the generic bucket by tag-density.
+        generic_acc.sort(key=lambda p: -len(p.tags))
+        half = max(1, len(generic_acc) // 2) if generic_acc else 0
+        selected = generic_acc[:half]
+        additional = generic_acc[half:]
 
     # ----- Certifications: union, dedup by name. -----
     certifications: list[CertificationEntry] = []
@@ -359,13 +562,31 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
                 seen_cert.add(key)
                 certifications.append(c)
 
-    # ----- Publications: scan every raw_text across all sources. -----
+    # ----- Publications: prefer the explicit Publications section block;
+    # fall back to the regex-over-raw-text approach when the CV has no
+    # Publications header. -----
     publications: list[PublicationEntry] = []
     seen_pub: set[str] = set()
+    for cv in cvs:
+        block = blocks_by_cv[cv.id].get("publications") or ""
+        for p in _publications_from_block(block):
+            key = p.title.lower()
+            if key and key not in seen_pub:
+                seen_pub.add(key)
+                publications.append(p)
+    for d in docs:
+        block = blocks_by_doc[d.id].get("publications") or ""
+        for p in _publications_from_block(block):
+            key = p.title.lower()
+            if key and key not in seen_pub:
+                seen_pub.add(key)
+                publications.append(p)
+    # Final fallback: scrape every raw_text for "Under Submission:" lines
+    # that weren't under a Publications header.
     for src in cvs + docs:  # type: ignore[operator]
         for p in _build_publications_from_summary(src.raw_text or ""):
             key = p.title.lower()
-            if key not in seen_pub:
+            if key and key not in seen_pub:
                 seen_pub.add(key)
                 publications.append(p)
 

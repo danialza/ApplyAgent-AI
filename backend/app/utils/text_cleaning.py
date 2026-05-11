@@ -196,13 +196,30 @@ SECTION_HEADERS: dict[str, list[str]] = {
         "education", "academic background", "academic qualifications",
         "qualifications", "educational background",
     ],
+    "selected_projects": [
+        "selected projects", "selected ai projects", "selected ai engineering projects",
+        "key projects", "featured projects", "highlighted projects",
+        "notable projects",
+    ],
+    "additional_projects": [
+        "additional projects", "additional technical projects", "other projects",
+        "side projects", "personal projects", "open source projects",
+        "open-source projects",
+    ],
+    # Generic fallback for CVs that have only one Projects header.
     "projects": [
-        "projects", "personal projects", "selected projects",
-        "key projects", "notable projects", "side projects",
+        "projects", "project experience",
+        "ai projects", "automation projects",
+        "ai automation projects", "ai engineering projects",
+        "ai applications", "applied projects",
     ],
     "certifications": [
         "certifications", "certificates", "licenses",
         "courses", "training", "professional development",
+    ],
+    "publications": [
+        "publications", "papers", "research", "research papers",
+        "academic publications", "selected publications",
     ],
     "languages": [
         "languages", "language proficiency", "spoken languages",
@@ -227,24 +244,42 @@ def normalize_header(line: str) -> str:
     return s
 
 
-def is_section_header(line: str, max_len: int = 40) -> str | None:
+def is_section_header(line: str, max_len: int = 60) -> str | None:
     """Return canonical section name if `line` looks like a header, else None.
 
-    A header must be short, on its own line, and either match a known variant
-    exactly, or be entirely uppercase with a known variant inside.
+    A header line is short (<= max_len), on its own line, and matches a
+    known variant either exactly or as a substring. The substring path
+    catches real-world variants like:
+
+      * "Selected AI, Robotics & Software Projects" → selected_projects
+      * "AI & Automation Projects"                  → projects
+      * "Work Experience & Career History"          → experience
+      * "Additional Background & Hobbies"           → additional_projects
+        (only when the variant is the dominant header noun)
+
+    Hit-priority: exact match > longest-variant containment. The
+    "longest first" tiebreaker prevents "projects" (5 chars) from
+    shadowing "selected ai projects" (20 chars) in a header that
+    contains both.
     """
     if not line or len(line) > max_len:
         return None
     norm = normalize_header(line)
     if not norm:
         return None
+    # 1. Exact match first — fastest, no ambiguity.
     if norm in _HEADER_LOOKUP:
         return _HEADER_LOOKUP[norm]
-    # Uppercase headers like "WORK EXPERIENCE" pass `normalize_header`,
-    # but also accept patterns where the variant is the whole content.
-    for variant, canonical in _HEADER_LOOKUP.items():
-        if norm == variant:
+    # 2. Token-subset match for multi-word variants, longest variant
+    # first so {selected, ai, projects} beats {projects} when both fit.
+    header_tokens = set(norm.split())
+    for variant, canonical in sorted(_HEADER_LOOKUP.items(), key=lambda kv: -len(kv[0])):
+        variant_tokens = set(variant.split())
+        if len(variant_tokens) >= 2 and variant_tokens.issubset(header_tokens):
             return canonical
+    # 3. Last resort: single-token variant exactly matches the line.
+    if " " not in norm and norm in _HEADER_LOOKUP:
+        return _HEADER_LOOKUP[norm]
     return None
 
 

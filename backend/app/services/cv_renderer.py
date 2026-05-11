@@ -275,6 +275,13 @@ _LATEX_TEMPLATE = r"""
 \end{onecolentry}
 
 <% endif %>
+<% if core_competencies %>
+\section{Core Competencies \hrulefill}
+\begin{onecolentry}
+<< core_competencies >>
+\end{onecolentry}
+
+<% endif %>
 <% if skills_groups %>
 \section{Technical Skills \hrulefill}
 \begin{onecolentry}
@@ -548,12 +555,30 @@ def render_cv(
         for g in skills_groups_sorted
     ]
 
+    # ---- Core Competencies row (career-ops style).
+    # Pick up to 8 JD keywords the CV's skills actually back. Output as a
+    # comma-separated bold-chip line inside the existing onecolentry
+    # environment so it matches Danial's template aesthetic.
+    cv_skill_keys: set[str] = set()
+    for g in library.skills_groups or []:
+        for s in g.items or []:
+            cv_skill_keys.add(group_key(s))
+    grounded = [t for t in jd_terms if group_key(t) in cv_skill_keys][:8]
+    if grounded:
+        # Render as bold-comma-separated terms; LaTeX escape each term.
+        core_competencies = " \\quad{}|\\quad{} ".join(
+            f"\\textbf{{{latex_escape(t)}}}" for t in grounded
+        )
+    else:
+        core_competencies = ""
+
     # ---- Render template.
     template = _jinja_env.from_string(_LATEX_TEMPLATE)
     latex = template.render(
         header=library.header,
         header_line=_header_line(library.header),
         summary=render_bullet(library.summary) if library.summary else "",
+        core_competencies=core_competencies,
         skills_groups=skills_groups_payload,
         education=render_education(library.education),
         selected_projects=render_projects(selected),
