@@ -89,26 +89,31 @@ async def upload_cvs(
                 pass
         store.save()
 
-    # Best-effort: if no CV library exists yet, seed it from the first
-    # uploaded CV so section 5 (Tailored CV) is usable immediately. We
-    # don't overwrite an existing library — the user may have curated it
-    # by hand and we'd lose their structure.
+    # Always rebuild the unified CV library from the full set of uploads
+    # (CVs + Documents). The library is a derived view — every upload
+    # contributes; the user can layer edits on top via the editor, but
+    # the canonical source is always the aggregate of raw uploads.
     if saved:
         try:
+            from datetime import datetime as _dt
             from app.models.db_models import CVLibrary  # local: avoid import cycle
-            from app.services.cv_library_builder import build_library_from_cv
+            from app.services.cv_library_builder import build_library_from_all
 
-            existing = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
-            if existing is None:
-                payload = build_library_from_cv(saved[0]).model_dump()
+            payload = build_library_from_all(db).model_dump()
+            row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+            if row is None:
                 row = CVLibrary(id=1, **payload)
                 db.add(row)
-                db.commit()
+            else:
+                for k, v in payload.items():
+                    setattr(row, k, v)
+                row.updated_at = _dt.utcnow()
+            db.commit()
         except Exception as exc:  # pragma: no cover
-            # Never let library seeding break an upload — log and move on.
+            # Never let library rebuild break an upload — log and move on.
             import logging as _log
             _log.getLogger("ai_job_cv_matcher.cv").warning(
-                "CV library auto-seed failed: %s", exc,
+                "CV library auto-rebuild failed: %s", exc,
             )
 
     return [CVOut.model_validate(cv) for cv in saved]
@@ -141,3 +146,22 @@ def delete_cv(cv_id: int, db: Session = Depends(get_db)) -> None:
     if store is not None:
         store.remove_cv(cv_id)
         store.save()
+
+    # Also re-aggregate the unified CV library so deletions propagate.
+    try:
+        from datetime import datetime as _dt
+        from app.models.db_models import CVLibrary
+        from app.services.cv_library_builder import build_library_from_all
+
+        payload = build_library_from_all(db).model_dump()
+        row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+        if row is not None:
+            for k, v in payload.items():
+                setattr(row, k, v)
+            row.updated_at = _dt.utcnow()
+            db.commit()
+    except Exception as exc:  # pragma: no cover
+        import logging as _log
+        _log.getLogger("ai_job_cv_matcher.cv").warning(
+            "CV library rebuild after delete failed: %s", exc,
+        )

@@ -94,9 +94,34 @@ async def build_profile(
             db.add(Document(filename=file.filename or "uploaded", raw_text=text))
         db.commit()
 
-    # 2. Run the aggregator.
+    # 2. Run the UserProfile aggregator (existing flow).
     payload = build_profile_payload(db)
     profile = upsert_user_profile(db, payload)
+
+    # 3. Also rebuild the unified CV library so section 5 (Tailored CV)
+    # picks up skills / projects / publications mentioned in any uploaded
+    # Document. Best-effort; failures shouldn't break the profile build.
+    try:
+        from datetime import datetime as _dt
+        from app.models.db_models import CVLibrary
+        from app.services.cv_library_builder import build_library_from_all
+
+        lib_payload = build_library_from_all(db).model_dump()
+        row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+        if row is None:
+            row = CVLibrary(id=1, **lib_payload)
+            db.add(row)
+        else:
+            for k, v in lib_payload.items():
+                setattr(row, k, v)
+            row.updated_at = _dt.utcnow()
+        db.commit()
+    except Exception as exc:  # pragma: no cover
+        import logging as _log
+        _log.getLogger("ai_job_cv_matcher.profile").warning(
+            "CV library rebuild on profile-build failed: %s", exc,
+        )
+
     return UserProfileOut.model_validate(profile)
 
 

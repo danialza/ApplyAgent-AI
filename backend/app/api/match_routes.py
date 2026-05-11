@@ -28,6 +28,7 @@ from app.services.extraction import extract_job
 from app.services.job_csv_importer import parse_csv_bytes
 from app.services.job_scraper import scrape_job_url
 from app.services.matching_engine import match_cv_to_job, rank_cvs
+from app.services.unified_candidate import get_unified_candidate
 from app.services.vector_store import get_vector_store
 
 router = APIRouter(prefix="/api/match", tags=["match"])
@@ -35,13 +36,22 @@ router = APIRouter(prefix="/api/match", tags=["match"])
 
 @router.post("", response_model=RankedMatchResponse)
 def match_all(payload: MatchRequest, db: Session = Depends(get_db)) -> RankedMatchResponse:
-    """Rank every uploaded CV against the given job description."""
-    cvs = db.query(CV).all()
-    if not cvs:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No CVs uploaded yet.",
-        )
+    """Match the JD against the unified CV library (aggregate of every upload).
+
+    Falls back to per-CV ranking only when the library hasn't been built
+    yet — once any CV is uploaded the library auto-rebuilds, so the
+    fallback only fires on a totally empty DB.
+    """
+    unified = get_unified_candidate(db)
+    if unified is not None:
+        cvs = [unified]
+    else:
+        cvs = db.query(CV).all()
+        if not cvs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No CVs uploaded yet.",
+            )
     job, results = rank_cvs(cvs, payload.job_text)
     recommended = results[0].cv_id if results else None
     return RankedMatchResponse(job=job, results=results, recommended_cv_id=recommended)
@@ -54,12 +64,16 @@ def match_from_url(payload: JobUrlRequest, db: Session = Depends(get_db)) -> Ran
     Returns 422 with a clear message if the page can't be scraped — the
     frontend should then offer the user the manual paste fallback.
     """
-    cvs = db.query(CV).all()
-    if not cvs:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No CVs uploaded yet.",
-        )
+    unified = get_unified_candidate(db)
+    if unified is not None:
+        cvs = [unified]
+    else:
+        cvs = db.query(CV).all()
+        if not cvs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No CVs uploaded yet.",
+            )
     result = scrape_job_url(payload.url)
     if not result.success:
         raise HTTPException(
@@ -90,12 +104,16 @@ async def match_batch_csv(
             detail="Only .csv files are supported.",
         )
 
-    cvs = db.query(CV).all()
-    if not cvs:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No CVs uploaded yet.",
-        )
+    unified = get_unified_candidate(db)
+    if unified is not None:
+        cvs = [unified]
+    else:
+        cvs = db.query(CV).all()
+        if not cvs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No CVs uploaded yet.",
+            )
 
     data = await file.read()
     parsed = parse_csv_bytes(data)
@@ -189,12 +207,16 @@ async def match_from_file(
     422 with a clear message if the file can't be parsed — the frontend
     should then offer the manual-paste fallback.
     """
-    cvs = db.query(CV).all()
-    if not cvs:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No CVs uploaded yet.",
-        )
+    unified = get_unified_candidate(db)
+    if unified is not None:
+        cvs = [unified]
+    else:
+        cvs = db.query(CV).all()
+        if not cvs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No CVs uploaded yet.",
+            )
 
     filename = file.filename or "uploaded.txt"
     ext = get_extension(filename)

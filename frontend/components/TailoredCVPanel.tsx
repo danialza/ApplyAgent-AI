@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { buildLibraryFromCV, fetchCVLibrary, listCVs, putCVLibrary, renderCV } from "@/lib/api";
+import {
+  buildLibraryFromCV,
+  fetchCVLibrary,
+  listCVs,
+  putCVLibrary,
+  rebuildLibraryFromAll,
+  renderCV,
+} from "@/lib/api";
 import type { CV, CVLibrary, RenderCVResponse } from "@/lib/types";
 
 interface Props {
@@ -63,6 +70,18 @@ export default function TailoredCVPanel({ onError }: Props) {
       setLibrary(updated);
     } catch (err) {
       onError(err instanceof Error ? err.message : "Library import failed.");
+    } finally {
+      setImportingFrom(null);
+    }
+  }
+
+  async function handleRebuildFromAll() {
+    setImportingFrom(-1); // sentinel for "rebuilding all"
+    try {
+      const updated = await rebuildLibraryFromAll();
+      setLibrary(updated);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Library rebuild failed.");
     } finally {
       setImportingFrom(null);
     }
@@ -169,30 +188,56 @@ export default function TailoredCVPanel({ onError }: Props) {
         onEdit={openEditor}
       />
 
-      {/* Import from uploaded CV */}
-      {cvs.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
-          <span className="font-medium text-slate-700">
-            Import library from an uploaded CV:
-          </span>
-          {cvs.slice(0, 5).map((cv) => (
-            <button
-              key={cv.id}
-              type="button"
-              onClick={() => handleImportFromCV(cv.id)}
-              disabled={importingFrom !== null}
-              title="Replace library with structured data parsed from this CV. Review in the editor afterwards."
-              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {importingFrom === cv.id
-                ? "Importing…"
-                : cv.name || cv.filename || `CV #${cv.id}`}
-            </button>
-          ))}
-          {cvs.length > 5 && (
-            <span className="text-slate-400">… {cvs.length - 5} more</span>
-          )}
+      {/* Unified library controls — one button to re-aggregate everything */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+        <div>
+          <p className="font-medium text-slate-700">
+            Unified CV library
+          </p>
+          <p className="text-slate-500">
+            The library auto-rebuilds from every upload (CV + Document).
+            Click <em>Rebuild</em> if you just edited raw uploads and want
+            a fresh merge.
+          </p>
         </div>
+        <button
+          type="button"
+          onClick={handleRebuildFromAll}
+          disabled={importingFrom !== null}
+          className="rounded-md border border-brand-500 bg-brand-500 px-3 py-1.5 font-semibold text-white shadow-sm hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {importingFrom === -1
+            ? "Rebuilding…"
+            : `Rebuild from all uploads (${cvs.length} CV${cvs.length === 1 ? "" : "s"})`}
+        </button>
+      </div>
+
+      {/* Per-CV import as a fallback for users who want a specific source */}
+      {cvs.length > 0 && (
+        <details className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs">
+          <summary className="cursor-pointer font-medium text-slate-600">
+            Or import from a specific CV file …
+          </summary>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {cvs.slice(0, 5).map((cv) => (
+              <button
+                key={cv.id}
+                type="button"
+                onClick={() => handleImportFromCV(cv.id)}
+                disabled={importingFrom !== null}
+                title="Replace library with structured data from this single CV only."
+                className="rounded-md border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {importingFrom === cv.id
+                  ? "Importing…"
+                  : cv.name || cv.filename || `CV #${cv.id}`}
+              </button>
+            ))}
+            {cvs.length > 5 && (
+              <span className="text-slate-400">… {cvs.length - 5} more</span>
+            )}
+          </div>
+        </details>
       )}
 
       {/* Editor (toggleable) */}

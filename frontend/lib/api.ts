@@ -147,6 +147,14 @@ export async function buildLibraryFromCV(cvId: number): Promise<CVLibrary> {
   return handle<CVLibrary>(res);
 }
 
+/** Aggregate every uploaded CV + Document into one merged library. */
+export async function rebuildLibraryFromAll(): Promise<CVLibrary> {
+  const res = await fetch(`${API_BASE}/api/cv/library/rebuild`, {
+    method: "POST",
+  });
+  return handle<CVLibrary>(res);
+}
+
 export async function putCVLibrary(payload: Omit<CVLibrary, "id" | "updated_at">): Promise<CVLibrary> {
   const res = await fetch(`${API_BASE}/api/cv/library`, {
     method: "PUT",

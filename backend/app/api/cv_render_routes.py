@@ -25,7 +25,7 @@ from app.models.schemas import (
 )
 from app.models.db_models import CV
 from app.services.codex_cv_polish import polish_library_with_llm
-from app.services.cv_library_builder import build_library_from_cv
+from app.services.cv_library_builder import build_library_from_all, build_library_from_cv
 from app.services.cv_renderer import render_cv
 from app.services.extraction import extract_job
 
@@ -62,6 +62,29 @@ def get_library(db: Session = Depends(get_db)) -> CVLibraryOut:
                 "or run `python -m scripts.seed_cv_library` to seed the bundled sample."
             ),
         )
+    return _to_out(row)
+
+
+@router.post("/library/rebuild", response_model=CVLibraryOut)
+def rebuild_library_from_all(db: Session = Depends(get_db)) -> CVLibraryOut:
+    """Aggregate every uploaded CV + Document into one merged library.
+
+    Replaces the singleton row. Header takes the newest CV's contact
+    info; skills / projects / experience / certifications / publications
+    / languages are unioned and deduplicated across all sources. Each
+    entry is auto-tagged with the canonical skills found in its text so
+    the renderer ranks by JD overlap without manual curation.
+    """
+    payload = build_library_from_all(db)
+    row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is None:
+        row = CVLibrary(id=1)
+        db.add(row)
+    for k, v in payload.model_dump().items():
+        setattr(row, k, v)
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
     return _to_out(row)
 
 

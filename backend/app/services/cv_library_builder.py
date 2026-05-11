@@ -26,7 +26,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from app.models.db_models import CV as CVRow
+from app.models.db_models import Document as DocumentRow
 from app.models.schemas import (
     CertificationEntry,
     CVHeader,
@@ -37,6 +40,7 @@ from app.models.schemas import (
     PublicationEntry,
     SkillGroup,
 )
+from app.services.cv_parser import parse_cv_text
 from app.utils.skill_dictionary import (
     AI_ML_SKILLS,
     ROBOTICS_SKILLS,
@@ -242,6 +246,158 @@ def _website_url(portfolio: str) -> str:
 
 
 # ---------- Public ----------
+
+def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
+    """Merge every uploaded CV + Document into one library.
+
+    Header takes the most recent CV's contact info (newest upload usually
+    reflects what the user wants displayed). Skills / projects /
+    experience / certifications / publications / languages are *unioned*
+    across all sources and deduplicated by canonical key. Each entry is
+    auto-tagged with the canonical skills found in its full text so the
+    renderer's JD-overlap ranking works out of the box.
+    """
+    cvs: list[CVRow] = (
+        db.query(CVRow).order_by(CVRow.created_at.asc()).all()
+    )
+    docs: list[DocumentRow] = (
+        db.query(DocumentRow).order_by(DocumentRow.created_at.asc()).all()
+    )
+
+    # ----- Header: newest CV wins for each field, but never overwrite a
+    # populated value with an empty one from an older CV. -----
+    header = CVHeader()
+    for cv in cvs:
+        if cv.name and not header.name:
+            header.name = cv.name.strip()
+        if cv.email and not header.email:
+            header.email = cv.email.strip()
+        if cv.phone and not header.phone:
+            header.phone = cv.phone.strip()
+        if cv.portfolio and not header.website:
+            header.website = _website_url(cv.portfolio)
+        if cv.linkedin and not header.linkedin:
+            header.linkedin = cv.linkedin.strip()
+        if cv.github and not header.github:
+            header.github = cv.github.strip()
+    if location:
+        header.location = location
+
+    # ----- Union skills across all sources, drop duplicates by canonical
+    # key, then bucket via skill_dictionary categories. -----
+    all_skills: list[str] = []
+    seen_skill: set[str] = set()
+    for cv in cvs:
+        for s in (cv.skills or []):
+            key = (s or "").strip().lower()
+            if key and key not in seen_skill:
+                seen_skill.add(key)
+                all_skills.append(s.strip())
+    # Also extract canonical skills from any Document text — TXT notes,
+    # certificates, project READMEs often list extra skills the parser
+    # missed in a CV.
+    for d in docs:
+        for s in find_technical_skills(d.raw_text or ""):
+            key = s.lower()
+            if key not in seen_skill:
+                seen_skill.add(key)
+                all_skills.append(s)
+    skills_groups = _group_skills(all_skills)
+
+    # ----- Education: union across CVs, dedup by institution+degree. -----
+    education: list[EducationEntry] = []
+    seen_edu: set[str] = set()
+    for cv in cvs:
+        for e in _build_education(list(cv.education or [])):
+            key = f"{e.institution.lower()}|{e.degree.lower()}"
+            if key not in seen_edu:
+                seen_edu.add(key)
+                education.append(e)
+
+    # ----- Experience: union, dedup by title+company. -----
+    experience: list[ExperienceEntryLib] = []
+    seen_exp: set[str] = set()
+    for cv in cvs:
+        for x in _build_experience(list(cv.experience or [])):
+            key = f"{x.title.lower()}|{x.company.lower()}"
+            if key not in seen_exp:
+                seen_exp.add(key)
+                experience.append(x)
+
+    # ----- Projects: union from CV.projects + Document text. -----
+    projects: list[ProjectEntry] = []
+    seen_proj: set[str] = set()
+    for cv in cvs:
+        for p in _build_projects(list(cv.projects or [])):
+            key = p.title.lower()
+            if key not in seen_proj:
+                seen_proj.add(key)
+                projects.append(p)
+    # Document fallback: if a Document's parsed structure surfaces
+    # project-like entries we missed in CV.projects, pull them in.
+    for d in docs:
+        parsed = parse_cv_text(d.raw_text or "")
+        for p in _build_projects(list(parsed.projects or [])):
+            key = p.title.lower()
+            if key not in seen_proj:
+                seen_proj.add(key)
+                projects.append(p)
+
+    # Top half by detected-tag count → "selected", rest → "additional".
+    projects.sort(key=lambda p: -len(p.tags))
+    half = max(1, len(projects) // 2) if projects else 0
+    selected = projects[:half]
+    additional = projects[half:]
+
+    # ----- Certifications: union, dedup by name. -----
+    certifications: list[CertificationEntry] = []
+    seen_cert: set[str] = set()
+    for cv in cvs:
+        for c in _build_certifications(list(cv.certifications or [])):
+            key = c.name.lower()
+            if key not in seen_cert:
+                seen_cert.add(key)
+                certifications.append(c)
+
+    # ----- Publications: scan every raw_text across all sources. -----
+    publications: list[PublicationEntry] = []
+    seen_pub: set[str] = set()
+    for src in cvs + docs:  # type: ignore[operator]
+        for p in _build_publications_from_summary(src.raw_text or ""):
+            key = p.title.lower()
+            if key not in seen_pub:
+                seen_pub.add(key)
+                publications.append(p)
+
+    # ----- Languages: union, dedup by head-token. -----
+    languages: list[str] = []
+    seen_lang: set[str] = set()
+    for cv in cvs:
+        for lang in (cv.languages or []):
+            head = (lang or "").split(":")[0].split("(")[0].strip().lower()
+            if head and head not in seen_lang:
+                seen_lang.add(head)
+                languages.append(lang)
+
+    # ----- Summary: pick the longest non-empty summary across CVs. -----
+    summary = ""
+    for cv in cvs:
+        if cv.summary and len(cv.summary) > len(summary):
+            summary = cv.summary.strip()
+
+    return CVLibraryBase(
+        header=header,
+        summary=summary,
+        skills_groups=skills_groups,
+        education=education,
+        selected_projects=selected,
+        additional_projects=additional,
+        experience=experience,
+        publications=publications,
+        certifications=certifications,
+        languages=languages,
+    )
+
 
 def build_library_from_cv(cv: CVRow, *, location: str = "") -> CVLibraryBase:
     """Project a CV row into a CVLibraryBase ready for upsert.
