@@ -9,6 +9,7 @@ import type {
   CVLibrary,
   JobFileResponse,
   JobUrlResponse,
+  LLMStatus,
   QueryBuilderResponse,
   RankedMatchResponse,
   RenderCVRequest,
@@ -153,6 +154,23 @@ export async function rebuildLibraryFromAll(): Promise<CVLibrary> {
     method: "POST",
   });
   return handle<CVLibrary>(res);
+}
+
+/** Upload a markdown CV (career-ops style cv.md) → replace library. */
+export async function uploadMarkdownCV(file: File): Promise<CVLibrary> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE}/api/cv/library/from-markdown`, {
+    method: "POST",
+    body: formData,
+  });
+  return handle<CVLibrary>(res);
+}
+
+/** Quick LLM connectivity check. */
+export async function fetchLLMStatus(): Promise<LLMStatus> {
+  const res = await fetch(`${API_BASE}/api/cv/llm-status`, { cache: "no-store" });
+  return handle<LLMStatus>(res);
 }
 
 export async function putCVLibrary(payload: Omit<CVLibrary, "id" | "updated_at">): Promise<CVLibrary> {

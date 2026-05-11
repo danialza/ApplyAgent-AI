@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import {
   buildLibraryFromCV,
   fetchCVLibrary,
+  fetchLLMStatus,
   listCVs,
   putCVLibrary,
   rebuildLibraryFromAll,
   renderCV,
+  uploadMarkdownCV,
 } from "@/lib/api";
-import type { CV, CVLibrary, RenderCVResponse } from "@/lib/types";
+import type { CV, CVLibrary, LLMStatus, RenderCVResponse } from "@/lib/types";
 
 interface Props {
   onError: (message: string) => void;
@@ -47,6 +49,43 @@ export default function TailoredCVPanel({ onError }: Props) {
   // Uploaded CVs available for one-click library re-seeding.
   const [cvs, setCvs] = useState<CV[]>([]);
   const [importingFrom, setImportingFrom] = useState<number | null>(null);
+
+  // Markdown CV uploader state.
+  const [uploadingMd, setUploadingMd] = useState(false);
+
+  // LLM status surfaced as a small badge so the user can verify the
+  // polish path is actually live, not silently falling back.
+  const [llmStatus, setLlmStatus] = useState<LLMStatus | null>(null);
+  const [llmChecking, setLlmChecking] = useState(false);
+
+  async function refreshLLMStatus() {
+    setLlmChecking(true);
+    try {
+      setLlmStatus(await fetchLLMStatus());
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "LLM status check failed.");
+    } finally {
+      setLlmChecking(false);
+    }
+  }
+
+  async function handleMarkdownUpload(file: File) {
+    setUploadingMd(true);
+    try {
+      const updated = await uploadMarkdownCV(file);
+      setLibrary(updated);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Markdown upload failed.");
+    } finally {
+      setUploadingMd(false);
+    }
+  }
+
+  // Fetch LLM status on mount so the badge is accurate before first render.
+  useEffect(() => {
+    refreshLLMStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -181,12 +220,55 @@ export default function TailoredCVPanel({ onError }: Props) {
 
   return (
     <div className="space-y-5">
+      {/* LLM connectivity badge */}
+      <LLMStatusBanner
+        status={llmStatus}
+        checking={llmChecking}
+        onRecheck={refreshLLMStatus}
+      />
+
       {/* Library status header */}
       <LibrarySummary
         library={library}
         loading={loadingLibrary}
         onEdit={openEditor}
       />
+
+      {/* Markdown CV uploader — career-ops style, deterministic parse */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs">
+        <div>
+          <p className="font-medium text-violet-900">
+            Upload Markdown CV (recommended)
+          </p>
+          <p className="text-violet-700">
+            Use{" "}
+            <a
+              href="https://github.com/your-handle/ai-job-cv-matcher/blob/main/docs/cv_template.md"
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              <code>docs/cv_template.md</code>
+            </a>{" "}
+            as a template — fill it in once, upload here. Deterministic
+            parse, no PDF whitespace surprises.
+          </p>
+        </div>
+        <label className="cursor-pointer rounded-md border border-violet-600 bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-violet-700">
+          <input
+            type="file"
+            accept=".md,.markdown,.txt,text/markdown"
+            className="sr-only"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleMarkdownUpload(f);
+              e.target.value = "";
+            }}
+            disabled={uploadingMd}
+          />
+          {uploadingMd ? "Parsing…" : "Upload cv.md"}
+        </label>
+      </div>
 
       {/* Unified library controls — one button to re-aggregate everything */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
@@ -343,6 +425,61 @@ export default function TailoredCVPanel({ onError }: Props) {
     </div>
   );
 }
+
+// ---------- LLM status banner ----------
+
+function LLMStatusBanner({
+  status,
+  checking,
+  onRecheck,
+}: {
+  status: LLMStatus | null;
+  checking: boolean;
+  onRecheck: () => void;
+}) {
+  let tone = "slate";
+  let label = "LLM status: checking…";
+  let detail = "";
+  if (status) {
+    if (status.reachable) {
+      tone = "emerald";
+      label = `LLM connected · ${status.model}`;
+      detail = status.base_url || "(default OpenAI endpoint)";
+    } else if (status.enabled) {
+      tone = "amber";
+      label = "LLM configured but unreachable";
+      detail = status.error || "no response from the chat-completions endpoint";
+    } else {
+      tone = "slate";
+      label = "LLM disabled (deterministic mode)";
+      detail = status.error || "set USE_LLM_EXTRACTION=true + OPENAI_API_KEY";
+    }
+  }
+  const toneClasses: Record<string, string> = {
+    emerald: "border-emerald-300 bg-emerald-50 text-emerald-900",
+    amber: "border-amber-300 bg-amber-50 text-amber-900",
+    slate: "border-slate-200 bg-slate-50 text-slate-700",
+  };
+  return (
+    <div
+      className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs ${toneClasses[tone]}`}
+    >
+      <div>
+        <p className="font-medium">{label}</p>
+        <p className="text-[11px] opacity-80">{detail}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onRecheck}
+        disabled={checking}
+        className="rounded-md border border-current/30 bg-white px-2.5 py-1 text-xs font-medium hover:bg-white/80 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {checking ? "Checking…" : "Re-check"}
+      </button>
+    </div>
+  );
+}
+
 
 // ---------- Library summary ----------
 

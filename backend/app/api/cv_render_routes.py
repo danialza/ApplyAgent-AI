@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -26,6 +26,7 @@ from app.models.schemas import (
 from app.models.db_models import CV
 from app.services.codex_cv_polish import polish_library_with_llm
 from app.services.cv_library_builder import build_library_from_all, build_library_from_cv
+from app.services.cv_markdown_parser import parse_cv_markdown
 from app.services.cv_renderer import render_cv
 from app.services.extraction import extract_job
 
@@ -62,6 +63,92 @@ def get_library(db: Session = Depends(get_db)) -> CVLibraryOut:
                 "or run `python -m scripts.seed_cv_library` to seed the bundled sample."
             ),
         )
+    return _to_out(row)
+
+
+@router.get("/llm-status")
+def llm_status() -> dict:
+    """Quick diagnostic — is the LLM polish layer reachable?
+
+    Hits the configured chat-completion endpoint with a 1-token ping.
+    Returns enabled / configured / reachable flags so the UI can show
+    a clear "LLM ON" badge instead of silently falling back.
+    """
+    from app.services import llm_extraction_service as llm
+
+    status_dict: dict = {
+        "enabled": llm.is_enabled(),
+        "configured": False,
+        "reachable": False,
+        "model": "",
+        "base_url": "",
+        "error": "",
+    }
+    if not llm.is_enabled():
+        status_dict["error"] = (
+            "LLM disabled — set USE_LLM_EXTRACTION=true + OPENAI_API_KEY "
+            "in .env and restart containers."
+        )
+        return status_dict
+
+    cfg = llm._config()  # type: ignore[attr-defined]
+    status_dict["configured"] = True
+    status_dict["model"] = cfg.get("model", "")
+    status_dict["base_url"] = cfg.get("base_url", "")
+
+    try:
+        # 1-token ping. If this returns anything, the API key + URL work.
+        reply = llm._chat_completion([  # type: ignore[attr-defined]
+            {"role": "system", "content": "Reply with the single word: pong"},
+            {"role": "user", "content": "ping"},
+        ])
+        status_dict["reachable"] = bool((reply or "").strip())
+        if not status_dict["reachable"]:
+            status_dict["error"] = "Empty response from LLM."
+    except Exception as exc:  # noqa: BLE001
+        status_dict["error"] = f"LLM call failed: {exc}"
+    return status_dict
+
+
+@router.post("/library/from-markdown", response_model=CVLibraryOut)
+async def upload_library_markdown(
+    file: UploadFile | None = File(default=None, description="Markdown CV file (.md)"),
+    db: Session = Depends(get_db),
+) -> CVLibraryOut:
+    """Replace the CV library by parsing an uploaded `cv.md` directly.
+
+    This is the recommended ingest path: deterministic parsing, no PDF
+    whitespace recovery, every field lands where it should. See the
+    template at `docs/cv_template.md` — fill it in once and upload here.
+    """
+    if file is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No file uploaded. Use multipart form field 'file'.",
+        )
+    if not (file.filename or "").lower().endswith((".md", ".markdown", ".txt")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only .md / .markdown / .txt files are accepted here.",
+        )
+    raw = await file.read()
+    text = raw.decode("utf-8", errors="replace")
+    if not text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Empty file.",
+        )
+
+    payload = parse_cv_markdown(text)
+    row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is None:
+        row = CVLibrary(id=1)
+        db.add(row)
+    for k, v in payload.model_dump().items():
+        setattr(row, k, v)
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
     return _to_out(row)
 
 

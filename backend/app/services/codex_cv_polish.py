@@ -54,37 +54,68 @@ class _LLMPolish(BaseModel):
 # ---------- Prompts ----------
 
 _SYSTEM = (
-    "You are a senior CV editor. Reformulate the candidate's bullets to "
-    "use the job description's exact vocabulary, but never invent new "
-    "skills, employers, dates, or numbers. Only reword claims the "
-    "candidate already made. Output STRICT JSON — no markdown fences, no "
-    "commentary."
+    "You are a senior CV editor following the career-ops methodology "
+    "(github.com/santifer/career-ops). Your job: tailor ONE CV to ONE "
+    "job description, step by step. "
+    "HARD RULES (non-negotiable): "
+    "(1) NEVER invent skills, employers, dates, numbers, or projects "
+    "the candidate doesn't already list in the library. "
+    "(2) ONLY REFORMULATE existing claims using the JD's exact "
+    "vocabulary. Reformulation = same meaning, JD wording. "
+    "(3) Output STRICT JSON — no markdown fences, no prose, no "
+    "comments. First char `{`, last char `}`."
 )
 
 _USER_TEMPLATE = """\
-You receive the candidate's CV library and one job description.
-Produce JSON with this exact shape (omit keys you don't need; never add new ones):
+TAILOR THIS CV TO THIS JOB. Run the 7-step career-ops pipeline exactly:
+
+  STEP 1 — Extract 15-20 canonical keywords from the JD (skill nouns +
+           role terms). Use exact form (e.g. "Reinforcement Learning",
+           not "RL paraphrase").
+  STEP 2 — Detect archetype: Applied AI Engineer / RL Researcher /
+           MLOps / RAG Engineer / NLP Engineer / Robotics / Full-stack
+           AI / Backend AI / Data Engineer. Open the Summary with the
+           candidate's strongest credential for that archetype.
+  STEP 3 — Rewrite the Professional Summary in 3-4 lines, NO first-
+           person pronouns. Thread in the top 5 JD keywords by
+           paraphrasing existing library claims. End with what the
+           candidate ships / builds / improves.
+  STEP 4 — For each project in selected_projects + additional_projects:
+           KEEP THE SAME NUMBER OF BULLETS as the library (so the
+           template renders cleanly). Reorder JD-relevant bullets to
+           front. Reword each bullet using JD vocab when an equivalent
+           meaning already exists.
+  STEP 5 — For each experience entry: reorder + reword bullets the
+           same way. Keep bullet count identical to the library.
+  STEP 6 — bold_keywords: list canonical skill/role nouns that appear
+           in your rewritten text AND in the JD. Only terms grounded
+           in the library's skills + the JD's required/preferred/
+           technologies. The renderer wraps these in \\textbf{{}}.
+  STEP 7 — Self-check before emitting:
+             * Per-entry bullet count == library bullet count.
+             * No new skill names introduced.
+             * Output is a valid JSON object.
+             * Title (and company) match library EXACTLY (case + spacing).
+
+OUTPUT SCHEMA (all keys required; empty arrays when nothing applies):
 
 {{
-  "summary": "<3-4 line professional summary, keyword-dense, no first-person pronouns>",
-  "bold_keywords": ["Python", "RAG", "FastAPI", ...],
+  "summary": "<rewritten Professional Summary, 3-4 lines>",
+  "bold_keywords": ["Python", "RAG", "FastAPI", "..."],
   "selected_projects": [
-    {{"title": "<exact title from library>", "highlights": ["<rewritten bullet>", "..."]}}
+    {{ "title": "<EXACT title>", "highlights": ["<bullet 1>", "<bullet 2>"] }}
   ],
-  "additional_projects": [...],
+  "additional_projects": [
+    {{ "title": "<EXACT title>", "highlights": ["..."] }}
+  ],
   "experience": [
-    {{"title": "<exact title>", "company": "<exact company>", "highlights": ["<rewritten bullet>", "..."]}}
+    {{
+      "title": "<EXACT title>",
+      "company": "<EXACT company>",
+      "highlights": ["<bullet 1>", "<bullet 2>"]
+    }}
   ]
 }}
-
-Rules:
-- For each project/experience entry you include, return the SAME number of
-  highlights the library already has — same count, just reworded and reordered
-  with JD-relevant bullets first.
-- bold_keywords: list the canonical skill/role nouns that appear in the
-  rewritten text AND in the JD. The renderer wraps them in \\textbf{{}}.
-- Never add skills the candidate doesn't already list in the library.
-- Match titles EXACTLY as written in the library — that's the join key.
 
 JOB DESCRIPTION:
 \"\"\"

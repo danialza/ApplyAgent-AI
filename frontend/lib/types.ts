@@ -312,6 +312,15 @@ export interface RenderCVRequest {
   use_llm?: boolean;
 }
 
+export interface LLMStatus {
+  enabled: boolean;
+  configured: boolean;
+  reachable: boolean;
+  model: string;
+  base_url: string;
+  error: string;
+}
+
 export interface RenderCVResponse {
   latex: string;
   pdf_b64: string;
