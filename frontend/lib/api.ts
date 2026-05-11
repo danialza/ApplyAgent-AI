@@ -140,6 +140,13 @@ export async function fetchCVLibrary(): Promise<CVLibrary | null> {
   return handle<CVLibrary>(res);
 }
 
+export async function buildLibraryFromCV(cvId: number): Promise<CVLibrary> {
+  const res = await fetch(`${API_BASE}/api/cv/library/from-cv/${cvId}`, {
+    method: "POST",
+  });
+  return handle<CVLibrary>(res);
+}
+
 export async function putCVLibrary(payload: Omit<CVLibrary, "id" | "updated_at">): Promise<CVLibrary> {
   const res = await fetch(`${API_BASE}/api/cv/library`, {
     method: "PUT",

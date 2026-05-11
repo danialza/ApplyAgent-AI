@@ -89,6 +89,28 @@ async def upload_cvs(
                 pass
         store.save()
 
+    # Best-effort: if no CV library exists yet, seed it from the first
+    # uploaded CV so section 5 (Tailored CV) is usable immediately. We
+    # don't overwrite an existing library — the user may have curated it
+    # by hand and we'd lose their structure.
+    if saved:
+        try:
+            from app.models.db_models import CVLibrary  # local: avoid import cycle
+            from app.services.cv_library_builder import build_library_from_cv
+
+            existing = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+            if existing is None:
+                payload = build_library_from_cv(saved[0]).model_dump()
+                row = CVLibrary(id=1, **payload)
+                db.add(row)
+                db.commit()
+        except Exception as exc:  # pragma: no cover
+            # Never let library seeding break an upload — log and move on.
+            import logging as _log
+            _log.getLogger("ai_job_cv_matcher.cv").warning(
+                "CV library auto-seed failed: %s", exc,
+            )
+
     return [CVOut.model_validate(cv) for cv in saved]
 
 

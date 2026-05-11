@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchCVLibrary, putCVLibrary, renderCV } from "@/lib/api";
-import type { CVLibrary, RenderCVResponse } from "@/lib/types";
+import { buildLibraryFromCV, fetchCVLibrary, listCVs, putCVLibrary, renderCV } from "@/lib/api";
+import type { CV, CVLibrary, RenderCVResponse } from "@/lib/types";
 
 interface Props {
   onError: (message: string) => void;
@@ -24,7 +24,10 @@ export default function TailoredCVPanel({ onError }: Props) {
   const [maxAdditional, setMaxAdditional] = useState(3);
   const [maxExperience, setMaxExperience] = useState(4);
   const [compilePdf, setCompilePdf] = useState(true);
-  const [useLlm, setUseLlm] = useState(false);
+  // Default ON: most users hit "Render" expecting tailoring. If LLM is
+  // disabled server-side, the render still succeeds (rule-based fallback)
+  // and llm_skip_reason explains the gap in the error banner.
+  const [useLlm, setUseLlm] = useState(true);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<RenderCVResponse | null>(null);
 
@@ -33,6 +36,37 @@ export default function TailoredCVPanel({ onError }: Props) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorJson, setEditorJson] = useState("");
   const [editorSaving, setEditorSaving] = useState(false);
+
+  // Uploaded CVs available for one-click library re-seeding.
+  const [cvs, setCvs] = useState<CV[]>([]);
+  const [importingFrom, setImportingFrom] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await listCVs();
+        if (!cancelled) setCvs(list);
+      } catch {
+        // Silent — section 1 already surfaces upload errors.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleImportFromCV(cvId: number) {
+    setImportingFrom(cvId);
+    try {
+      const updated = await buildLibraryFromCV(cvId);
+      setLibrary(updated);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Library import failed.");
+    } finally {
+      setImportingFrom(null);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -134,6 +168,32 @@ export default function TailoredCVPanel({ onError }: Props) {
         loading={loadingLibrary}
         onEdit={openEditor}
       />
+
+      {/* Import from uploaded CV */}
+      {cvs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+          <span className="font-medium text-slate-700">
+            Import library from an uploaded CV:
+          </span>
+          {cvs.slice(0, 5).map((cv) => (
+            <button
+              key={cv.id}
+              type="button"
+              onClick={() => handleImportFromCV(cv.id)}
+              disabled={importingFrom !== null}
+              title="Replace library with structured data parsed from this CV. Review in the editor afterwards."
+              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {importingFrom === cv.id
+                ? "Importing…"
+                : cv.name || cv.filename || `CV #${cv.id}`}
+            </button>
+          ))}
+          {cvs.length > 5 && (
+            <span className="text-slate-400">… {cvs.length - 5} more</span>
+          )}
+        </div>
+      )}
 
       {/* Editor (toggleable) */}
       {editorOpen && (

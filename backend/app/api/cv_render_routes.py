@@ -23,7 +23,9 @@ from app.models.schemas import (
     RenderCVRequest,
     RenderCVResponse,
 )
+from app.models.db_models import CV
 from app.services.codex_cv_polish import polish_library_with_llm
+from app.services.cv_library_builder import build_library_from_cv
 from app.services.cv_renderer import render_cv
 from app.services.extraction import extract_job
 
@@ -60,6 +62,37 @@ def get_library(db: Session = Depends(get_db)) -> CVLibraryOut:
                 "or run `python -m scripts.seed_cv_library` to seed the bundled sample."
             ),
         )
+    return _to_out(row)
+
+
+@router.post("/library/from-cv/{cv_id}", response_model=CVLibraryOut)
+def build_library_from_cv_id(
+    cv_id: int,
+    db: Session = Depends(get_db),
+) -> CVLibraryOut:
+    """Build / replace the CV library by parsing an uploaded CV row.
+
+    Best-effort — the editor in the UI is the source of truth for the
+    final shape. Auto-tags every entry with canonical skills found in
+    its text so the renderer can rank by JD overlap immediately.
+    """
+    cv = db.query(CV).filter(CV.id == cv_id).first()
+    if cv is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"CV {cv_id} not found.",
+        )
+    payload = build_library_from_cv(cv)
+
+    row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is None:
+        row = CVLibrary(id=1)
+        db.add(row)
+    for k, v in payload.model_dump().items():
+        setattr(row, k, v)
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
     return _to_out(row)
 
 
