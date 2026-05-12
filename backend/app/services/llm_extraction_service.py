@@ -227,24 +227,36 @@ def _config() -> dict[str, Any]:
 # ---------- LLM call ----------
 
 # Indirection so tests can monkeypatch the network layer without httpx.
-def _chat_completion(messages: list[dict[str, str]]) -> str:
+def _chat_completion(messages: list[dict[str, str]], *, json_mode: bool = True) -> str:
     """POST to the configured chat endpoint, return the assistant text.
 
     Dispatches by provider:
-      - openai: /chat/completions with `response_format=json_object`.
-      - anthropic: /v1/messages with system+messages split, JSON enforced
-        by an explicit "respond with JSON only" suffix on the user prompt
-        plus a prefilled assistant turn with "{" to force JSON output.
+      - openai: /chat/completions with `response_format=json_object`
+        when ``json_mode`` is True.
+      - anthropic: /v1/messages with system+messages split. When
+        ``json_mode`` is True, JSON is enforced by a suffix on the last
+        user message plus a prefilled assistant turn with "{". When
+        False, the call is a plain text completion.
 
     Raises with the upstream error body on any non-2xx.
     """
     cfg = _config()
     if cfg["provider"] == "anthropic":
-        return _chat_completion_anthropic(messages, cfg)
-    return _chat_completion_openai(messages, cfg)
+        return _chat_completion_anthropic(messages, cfg, json_mode=json_mode)
+    return _chat_completion_openai(messages, cfg, json_mode=json_mode)
 
 
-def _chat_completion_openai(messages: list[dict[str, str]], cfg: dict[str, Any]) -> str:
+def chat_text(messages: list[dict[str, str]]) -> str:
+    """Public wrapper for free-form (non-JSON) chat completions."""
+    return _chat_completion(messages, json_mode=False)
+
+
+def _chat_completion_openai(
+    messages: list[dict[str, str]],
+    cfg: dict[str, Any],
+    *,
+    json_mode: bool = True,
+) -> str:
     import httpx  # local import — keeps module importable when httpx absent
 
     url = f"{cfg['base_url']}/chat/completions"
@@ -256,8 +268,9 @@ def _chat_completion_openai(messages: list[dict[str, str]], cfg: dict[str, Any])
         "model": cfg["model"],
         "messages": messages,
         "temperature": 0.1,
-        "response_format": {"type": "json_object"},
     }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
     with httpx.Client(timeout=cfg["timeout"]) as client:
         resp = client.post(url, headers=headers, json=payload)
         if resp.status_code >= 400:
@@ -276,7 +289,12 @@ def _chat_completion_openai(messages: list[dict[str, str]], cfg: dict[str, Any])
     return data["choices"][0]["message"]["content"]
 
 
-def _chat_completion_anthropic(messages: list[dict[str, str]], cfg: dict[str, Any]) -> str:
+def _chat_completion_anthropic(
+    messages: list[dict[str, str]],
+    cfg: dict[str, Any],
+    *,
+    json_mode: bool = True,
+) -> str:
     """Anthropic Messages API call.
 
     Differences from OpenAI:
@@ -298,19 +316,20 @@ def _chat_completion_anthropic(messages: list[dict[str, str]], cfg: dict[str, An
         # Anthropic requires at least one user message.
         raise RuntimeError("Anthropic call needs at least one non-system message.")
 
-    # Strengthen the JSON-only instruction on the final user turn so the
-    # model doesn't ramble in prose.
-    last = dict(chat_messages[-1])
-    last["content"] = (
-        (last.get("content") or "")
-        + "\n\nRespond with valid JSON only. No markdown, no prose."
-    )
-    chat_messages = chat_messages[:-1] + [last]
-
-    # Pre-fill the assistant turn with `{` so the model continues mid-
-    # JSON. We strip the prefill back on the response.
-    prefill = "{"
-    chat_messages = chat_messages + [{"role": "assistant", "content": prefill}]
+    prefill = ""
+    if json_mode:
+        # Strengthen the JSON-only instruction on the final user turn so the
+        # model doesn't ramble in prose.
+        last = dict(chat_messages[-1])
+        last["content"] = (
+            (last.get("content") or "")
+            + "\n\nRespond with valid JSON only. No markdown, no prose."
+        )
+        chat_messages = chat_messages[:-1] + [last]
+        # Pre-fill the assistant turn with `{` so the model continues mid-
+        # JSON. We strip the prefill back on the response.
+        prefill = "{"
+        chat_messages = chat_messages + [{"role": "assistant", "content": prefill}]
 
     url = f"{cfg['base_url']}/messages"
     headers = {
@@ -346,7 +365,7 @@ def _chat_completion_anthropic(messages: list[dict[str, str]], cfg: dict[str, An
     body = "".join(parts).strip()
     # Re-attach the prefilled `{` so downstream JSON parsing sees a
     # complete object.
-    if not body.startswith("{"):
+    if prefill and not body.startswith("{"):
         body = prefill + body
     return body
 

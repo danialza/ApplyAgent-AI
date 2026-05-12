@@ -181,6 +181,18 @@ export async function uploadMarkdownCV(file: File): Promise<CVLibrary> {
   return handle<CVLibrary>(res);
 }
 
+/** Convert raw CV text → cv.md via the connected LLM. */
+export async function convertCVTextToMarkdown(
+  text: string
+): Promise<{ markdown: string; filename: string }> {
+  const res = await fetch(`${API_BASE}/api/cv/convert-to-markdown`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  return handle<{ markdown: string; filename: string }>(res);
+}
+
 /** Quick LLM connectivity check. */
 export async function fetchLLMStatus(): Promise<LLMStatus> {
   const res = await fetch(`${API_BASE}/api/cv/llm-status`, { cache: "no-store" });

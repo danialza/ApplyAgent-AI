@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   buildLibraryFromCV,
+  convertCVTextToMarkdown,
   deleteCVLibrary,
   fetchCVLibrary,
   fetchCVTemplate,
@@ -54,6 +55,55 @@ export default function TailoredCVPanel({ onError }: Props) {
 
   // Markdown CV uploader state.
   const [uploadingMd, setUploadingMd] = useState(false);
+
+  // In-app LLM converter: paste raw CV text → cv.md, then push into
+  // the library with one click. Same prompt as docs/cv_to_markdown_prompt.md.
+  const [converterOpen, setConverterOpen] = useState(false);
+  const [converterInput, setConverterInput] = useState("");
+  const [converterOutput, setConverterOutput] = useState("");
+  const [converting, setConverting] = useState(false);
+  const [seedingFromConverter, setSeedingFromConverter] = useState(false);
+
+  async function handleConvertCVText() {
+    if (!converterInput.trim()) {
+      onError("Paste some CV text first.");
+      return;
+    }
+    setConverting(true);
+    setConverterOutput("");
+    try {
+      const { markdown } = await convertCVTextToMarkdown(converterInput);
+      setConverterOutput(markdown);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Conversion failed.");
+    } finally {
+      setConverting(false);
+    }
+  }
+
+  async function handleSeedFromConverter() {
+    if (!converterOutput.trim()) return;
+    setSeedingFromConverter(true);
+    try {
+      const blob = new File([converterOutput], "cv.md", {
+        type: "text/markdown",
+      });
+      const updated = await uploadMarkdownCV(blob);
+      setLibrary(updated);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Seeding library failed.");
+    } finally {
+      setSeedingFromConverter(false);
+    }
+  }
+
+  async function handleCopyConverterOutput() {
+    try {
+      await navigator.clipboard.writeText(converterOutput);
+    } catch {
+      onError("Clipboard copy blocked by the browser.");
+    }
+  }
 
   // LLM status surfaced as a small badge so the user can verify the
   // polish path is actually live, not silently falling back.
@@ -338,6 +388,119 @@ export default function TailoredCVPanel({ onError }: Props) {
             </label>
           </div>
         </div>
+      </div>
+
+      {/* LLM-powered converter — paste any CV, get cv.md, seed library
+          without leaving the page. Only useful when an API key is wired. */}
+      <div className="space-y-2 rounded-lg border border-indigo-300 bg-indigo-50 p-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="text-sm font-semibold text-indigo-900">
+              Convert any CV → cv.md with the connected LLM
+            </p>
+            <p className="text-xs text-indigo-700">
+              Paste raw CV text (PDF copy-paste, LinkedIn export, free
+              notes). Same prompt as <code>docs/cv_to_markdown_prompt.md</code>{" "}
+              — runs through your{" "}
+              {llmStatus?.provider
+                ? `${llmStatus.provider} · ${llmStatus.model}`
+                : "configured LLM"}
+              .
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setConverterOpen((v) => !v)}
+            className="rounded-md border border-indigo-400 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-900 hover:bg-indigo-100"
+          >
+            {converterOpen ? "Hide" : "Open converter"}
+          </button>
+        </div>
+
+        {converterOpen && (
+          <div className="space-y-2">
+            {!llmStatus?.reachable && (
+              <p className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900">
+                LLM not reachable. Set <code>USE_LLM_EXTRACTION=true</code>{" "}
+                and an API key in <code>.env</code>, then restart the
+                backend.
+              </p>
+            )}
+            <textarea
+              value={converterInput}
+              onChange={(e) => setConverterInput(e.target.value)}
+              rows={8}
+              placeholder="Paste your existing CV text here — any format works."
+              className="w-full rounded-md border border-indigo-200 bg-white px-2 py-1.5 font-mono text-xs text-slate-800 focus:border-indigo-500 focus:outline-none"
+              disabled={converting}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleConvertCVText}
+                disabled={converting || !converterInput.trim()}
+                className="rounded-md border border-indigo-600 bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {converting ? "Converting…" : "Convert with LLM"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConverterInput("");
+                  setConverterOutput("");
+                }}
+                disabled={converting}
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Clear
+              </button>
+            </div>
+
+            {converterOutput && (
+              <div className="space-y-2 rounded-md border border-indigo-200 bg-white p-2">
+                <p className="text-xs font-semibold text-indigo-900">
+                  cv.md preview — edit if needed, then seed the library
+                </p>
+                <textarea
+                  value={converterOutput}
+                  onChange={(e) => setConverterOutput(e.target.value)}
+                  rows={14}
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-xs text-slate-800 focus:border-indigo-500 focus:outline-none"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSeedFromConverter}
+                    disabled={seedingFromConverter}
+                    className="rounded-md border border-violet-600 bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-violet-700 disabled:opacity-50"
+                  >
+                    {seedingFromConverter ? "Seeding…" : "Use as library"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      download(
+                        "cv.md",
+                        converterOutput,
+                        "text/markdown;charset=utf-8"
+                      )
+                    }
+                    className="rounded-md border border-indigo-400 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-900 hover:bg-indigo-50"
+                  >
+                    Download cv.md
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyConverterOutput}
+                    className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Unified library controls — one button to re-aggregate everything */}

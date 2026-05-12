@@ -26,6 +26,7 @@ from app.models.schemas import (
 from app.models.db_models import CV
 from app.services.codex_cv_polish import polish_library_with_llm
 from app.services.cv_library_builder import build_library_from_all, build_library_from_cv
+from app.services.cv_markdown_converter import convert_cv_text_to_markdown
 from app.services.cv_markdown_parser import parse_cv_markdown
 from app.services.cv_renderer import render_cv
 from app.services.extraction import extract_job
@@ -147,6 +148,32 @@ def llm_status() -> dict:
     except Exception as exc:  # noqa: BLE001
         status_dict["error"] = f"LLM call failed: {exc}"
     return status_dict
+
+
+@router.post("/convert-to-markdown")
+def convert_to_markdown(payload: dict) -> dict:
+    """Run the connected LLM over pasted CV text → return one cv.md string.
+
+    Body: ``{"text": "<raw CV — pdf paste, linkedin export, free notes>"}``
+    Returns: ``{"markdown": "...", "filename": "cv.md"}``
+
+    Same prompt as ``docs/cv_to_markdown_prompt.md`` so the in-app flow
+    and the copy-paste-to-Claude flow produce identical output shape.
+    """
+    text = (payload or {}).get("text", "")
+    if not isinstance(text, str) or not text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Body must include non-empty 'text' field.",
+        )
+    try:
+        md = convert_cv_text_to_markdown(text)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    return {"markdown": md, "filename": "cv.md"}
 
 
 @router.post("/library/from-markdown", response_model=CVLibraryOut)
