@@ -89,31 +89,32 @@ async def upload_cvs(
                 pass
         store.save()
 
-    # Always rebuild the unified CV library from the full set of uploads
-    # (CVs + Documents). The library is a derived view — every upload
-    # contributes; the user can layer edits on top via the editor, but
-    # the canonical source is always the aggregate of raw uploads.
+    # ONLY auto-seed the library the very first time. Never overwrite an
+    # existing library with PDF-derived data — pdfplumber's word
+    # boundaries are too unreliable on real-world fonts (charter, kerned
+    # PDFs, etc.) and the result is bullets misclassified across
+    # sections. Once the user uploads a clean cv.md via
+    # POST /api/cv/library/from-markdown, every future PDF upload skips
+    # this hook and feeds only the matcher / vector index. The user
+    # can always trigger an explicit rebuild via
+    # POST /api/cv/library/rebuild if they want.
     if saved:
         try:
             from datetime import datetime as _dt
             from app.models.db_models import CVLibrary  # local: avoid import cycle
             from app.services.cv_library_builder import build_library_from_all
 
-            payload = build_library_from_all(db).model_dump()
-            row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
-            if row is None:
+            existing = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+            if existing is None:
+                payload = build_library_from_all(db).model_dump()
                 row = CVLibrary(id=1, **payload)
                 db.add(row)
-            else:
-                for k, v in payload.items():
-                    setattr(row, k, v)
-                row.updated_at = _dt.utcnow()
-            db.commit()
+                db.commit()
         except Exception as exc:  # pragma: no cover
-            # Never let library rebuild break an upload — log and move on.
+            # Never let library auto-seed break an upload — log and move on.
             import logging as _log
             _log.getLogger("ai_job_cv_matcher.cv").warning(
-                "CV library auto-rebuild failed: %s", exc,
+                "CV library auto-seed failed: %s", exc,
             )
 
     return [CVOut.model_validate(cv) for cv in saved]
@@ -147,21 +148,7 @@ def delete_cv(cv_id: int, db: Session = Depends(get_db)) -> None:
         store.remove_cv(cv_id)
         store.save()
 
-    # Also re-aggregate the unified CV library so deletions propagate.
-    try:
-        from datetime import datetime as _dt
-        from app.models.db_models import CVLibrary
-        from app.services.cv_library_builder import build_library_from_all
-
-        payload = build_library_from_all(db).model_dump()
-        row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
-        if row is not None:
-            for k, v in payload.items():
-                setattr(row, k, v)
-            row.updated_at = _dt.utcnow()
-            db.commit()
-    except Exception as exc:  # pragma: no cover
-        import logging as _log
-        _log.getLogger("ai_job_cv_matcher.cv").warning(
-            "CV library rebuild after delete failed: %s", exc,
-        )
+    # NOTE: we deliberately don't re-aggregate the library after a delete.
+    # PDF parsing is lossy, and a markdown-built library is the source of
+    # truth. To force a re-aggregation, the user explicitly calls
+    # POST /api/cv/library/rebuild.

@@ -156,6 +156,20 @@ export async function rebuildLibraryFromAll(): Promise<CVLibrary> {
   return handle<CVLibrary>(res);
 }
 
+/** Fetch the canonical CV markdown template for one-click download. */
+export async function fetchCVTemplate(): Promise<{ filename: string; content: string }> {
+  const res = await fetch(`${API_BASE}/api/cv/template`, { cache: "no-store" });
+  return handle<{ filename: string; content: string }>(res);
+}
+
+/** Drop the singleton library row (e.g. after a bad PDF auto-seed). */
+export async function deleteCVLibrary(): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/cv/library`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) {
+    throw new ApiError(`Delete library failed (HTTP ${res.status})`, res.status);
+  }
+}
+
 /** Upload a markdown CV (career-ops style cv.md) → replace library. */
 export async function uploadMarkdownCV(file: File): Promise<CVLibrary> {
   const formData = new FormData();

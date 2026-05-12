@@ -66,6 +66,41 @@ def get_library(db: Session = Depends(get_db)) -> CVLibraryOut:
     return _to_out(row)
 
 
+@router.get("/template")
+def get_template() -> dict:
+    """Return the canonical CV markdown template so the UI can offer a
+    one-click download. Keeps the source-of-truth in
+    `docs/cv_template.md` — change it there, all consumers pick it up.
+    """
+    from pathlib import Path
+
+    this = Path(__file__).resolve()
+    candidates: list[Path] = [Path("/app/docs/cv_template.md")]
+    # Walk up to repo root in dev so this works without Docker too.
+    for n in range(2, 6):
+        if len(this.parents) > n:
+            candidates.append(this.parents[n] / "docs" / "cv_template.md")
+    for p in candidates:
+        if p.is_file():
+            return {"filename": "cv_template.md", "content": p.read_text(encoding="utf-8")}
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Template file not found in the running image.",
+    )
+
+
+@router.delete("/library", status_code=status.HTTP_204_NO_CONTENT)
+def delete_library(db: Session = Depends(get_db)) -> None:
+    """Drop the singleton library row. Useful when PDF auto-build
+    seeded a messy library and the user wants a clean slate before
+    uploading `cv.md`. CVs + Documents are untouched."""
+    row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is None:
+        return
+    db.delete(row)
+    db.commit()
+
+
 @router.get("/llm-status")
 def llm_status() -> dict:
     """Quick diagnostic — is the LLM polish layer reachable?

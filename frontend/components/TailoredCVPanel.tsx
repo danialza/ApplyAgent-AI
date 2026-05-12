@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import {
   buildLibraryFromCV,
+  deleteCVLibrary,
   fetchCVLibrary,
+  fetchCVTemplate,
   fetchLLMStatus,
   listCVs,
   putCVLibrary,
@@ -80,6 +82,34 @@ export default function TailoredCVPanel({ onError }: Props) {
       setUploadingMd(false);
     }
   }
+
+  async function handleDownloadTemplate() {
+    try {
+      const { filename, content } = await fetchCVTemplate();
+      download(filename, content, "text/markdown;charset=utf-8");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Could not fetch template.");
+    }
+  }
+
+  async function handleResetLibrary() {
+    if (!confirm("Delete the current CV library? CVs + Documents stay; only the parsed library is removed.")) {
+      return;
+    }
+    try {
+      await deleteCVLibrary();
+      setLibrary(null);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Reset failed.");
+    }
+  }
+
+  // Heuristic: detect a library that was auto-built from a PDF and looks
+  // garbled (words mashed together). When triggered we show an amber
+  // banner pushing the user toward the markdown path.
+  const looksLossy = library
+    ? detectLossyLibrary(library)
+    : false;
 
   // Fetch LLM status on mount so the badge is accurate before first render.
   useEffect(() => {
@@ -235,40 +265,79 @@ export default function TailoredCVPanel({ onError }: Props) {
         onEdit={openEditor}
       />
 
-      {/* Markdown CV uploader — career-ops style, deterministic parse */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs">
-        <div>
-          <p className="font-medium text-violet-900">
-            Upload Markdown CV (recommended)
+      {/* Lossy-PDF warning when auto-seed produced garbage */}
+      {looksLossy && (
+        <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+          <p className="font-semibold">
+            ⚠ This library looks like it was auto-built from a PDF, which is
+            unreliable on real-world CVs.
           </p>
-          <p className="text-violet-700">
-            Use{" "}
-            <a
-              href="https://github.com/your-handle/ai-job-cv-matcher/blob/main/docs/cv_template.md"
-              target="_blank"
-              rel="noreferrer"
-              className="underline"
+          <p>
+            PDF text extraction drops inter-word spacing on many fonts, so
+            projects get misclassified into Education / Skills and the
+            tailored CV reads garbled.
+          </p>
+          <p>
+            <strong>Fix in 30 seconds:</strong> download the markdown
+            template, fill it in (it&apos;s already structured), upload
+            here. Career-ops uses the same approach.
+          </p>
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              className="rounded-md border border-amber-600 bg-white px-2.5 py-1 font-semibold text-amber-900 hover:bg-amber-100"
             >
-              <code>docs/cv_template.md</code>
-            </a>{" "}
-            as a template — fill it in once, upload here. Deterministic
-            parse, no PDF whitespace surprises.
-          </p>
+              Download cv_template.md
+            </button>
+            <button
+              type="button"
+              onClick={handleResetLibrary}
+              className="rounded-md border border-rose-300 bg-white px-2.5 py-1 font-semibold text-rose-700 hover:bg-rose-50"
+            >
+              Reset library
+            </button>
+          </div>
         </div>
-        <label className="cursor-pointer rounded-md border border-violet-600 bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-violet-700">
-          <input
-            type="file"
-            accept=".md,.markdown,.txt,text/markdown"
-            className="sr-only"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handleMarkdownUpload(f);
-              e.target.value = "";
-            }}
-            disabled={uploadingMd}
-          />
-          {uploadingMd ? "Parsing…" : "Upload cv.md"}
-        </label>
+      )}
+
+      {/* Markdown CV uploader — career-ops style, deterministic parse */}
+      <div className="space-y-2 rounded-lg border border-violet-300 bg-violet-50 p-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="text-sm font-semibold text-violet-900">
+              Upload Markdown CV (recommended — career-ops style)
+            </p>
+            <p className="text-xs text-violet-700">
+              Fill in the template once, upload here. Deterministic parse,
+              every section lands where it should, no PDF whitespace
+              surprises. The tailored renderer relies on this being clean.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              className="rounded-md border border-violet-400 bg-white px-3 py-1.5 text-xs font-semibold text-violet-900 hover:bg-violet-100"
+            >
+              Download template
+            </button>
+            <label className="cursor-pointer rounded-md border border-violet-600 bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-violet-700">
+              <input
+                type="file"
+                accept=".md,.markdown,.txt,text/markdown"
+                className="sr-only"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleMarkdownUpload(f);
+                  e.target.value = "";
+                }}
+                disabled={uploadingMd}
+              />
+              {uploadingMd ? "Parsing…" : "Upload cv.md"}
+            </label>
+          </div>
+        </div>
       </div>
 
       {/* Unified library controls — one button to re-aggregate everything */}
@@ -670,6 +739,36 @@ function ResultPanel({
 }
 
 // ---------- helpers ----------
+
+/**
+ * Heuristic — does the library look like it came from a lossy PDF parse?
+ * Signals: a skill-group called "Other" that's much larger than every
+ * normal group, OR a degree string with no internal whitespace > 25 chars,
+ * OR an experience company starting with a comma. Conservative — we'd
+ * rather miss a warning than wrongly accuse a clean markdown upload.
+ */
+function detectLossyLibrary(library: CVLibrary): boolean {
+  const otherGroup = library.skills_groups.find(
+    (g) => g.label.toLowerCase() === "other",
+  );
+  const normalSize = library.skills_groups
+    .filter((g) => g.label.toLowerCase() !== "other")
+    .reduce((max, g) => Math.max(max, g.items.length), 0);
+  if (otherGroup && otherGroup.items.length > Math.max(20, normalSize * 4)) {
+    return true;
+  }
+  for (const e of library.education) {
+    const flat = (e.institution || "").replace(/\s+/g, "");
+    if (flat.length > 40 && /[a-z][A-Z]/.test(e.institution || "")) {
+      return true; // CamelCase-without-spaces is a pdfplumber signature
+    }
+  }
+  for (const x of library.experience) {
+    if ((x.company || "").trim().startsWith(",")) return true;
+  }
+  return false;
+}
+
 
 function download(filename: string, data: string, mime: string) {
   const blob = new Blob([data], { type: mime });

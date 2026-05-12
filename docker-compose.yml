@@ -46,6 +46,10 @@ services:
       - backend_data:/data
       # Cache HF model downloads so cold starts after the first one are fast.
       - hf_cache:/data/hf_cache
+      # Read-only mount of the repo docs/ so the backend can serve the
+      # canonical cv_template.md via GET /api/cv/template without
+      # copying it into the image at build time.
+      - ./docs:/app/docs:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
       interval: 30s
