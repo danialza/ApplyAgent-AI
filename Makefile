@@ -55,9 +55,14 @@ eval: ## Run extraction + matching evaluators on the synthetic gold set.
 
 # ---- Docker ----
 
+# `docker compose --env-file` REPLACES the default `.env` lookup, so the
+# port-overrides file alone hides every other secret. Always pass both
+# when one exists. `-f` files are merged in order; later files win.
+COMPOSE_ENV_FILES := $(strip $(if $(wildcard .env),--env-file .env,) $(if $(wildcard .env.ports),--env-file .env.ports,))
+
 .PHONY: docker-up
 docker-up: ## Build and start all services on default ports (3000 / 8000).
-	docker compose up --build -d
+	docker compose $(COMPOSE_ENV_FILES) up --build -d
 	@echo ""
 	@echo "Backend  → http://localhost:8000  (docs at /docs)"
 	@echo "Frontend → http://localhost:3000"
@@ -65,26 +70,26 @@ docker-up: ## Build and start all services on default ports (3000 / 8000).
 .PHONY: docker-up-auto
 docker-up-auto: ## Auto-pick free host ports if 3000 / 8000 are taken.
 	@bash scripts/pick-ports.sh --write
-	@docker compose --env-file .env.ports up --build -d
+	@docker compose $(COMPOSE_ENV_FILES) up --build -d
 	@echo ""
 	@grep '^FRONTEND_PORT' .env.ports | sed 's|FRONTEND_PORT=|Frontend → http://localhost:|'
 	@grep '^BACKEND_PORT'  .env.ports | sed 's|BACKEND_PORT=|Backend  → http://localhost:|'
 
 .PHONY: docker-down
 docker-down: ## Stop services and remove containers (volumes preserved).
-	docker compose down
+	docker compose $(COMPOSE_ENV_FILES) down
 
 .PHONY: docker-logs
 docker-logs: ## Tail combined backend + frontend logs.
-	docker compose logs -f --tail=100
+	docker compose $(COMPOSE_ENV_FILES) logs -f --tail=100
 
 .PHONY: docker-clean
 docker-clean: ## Stop services AND remove volumes (deletes DB, uploads, index).
-	docker compose down -v
+	docker compose $(COMPOSE_ENV_FILES) down -v
 
 .PHONY: docker-rebuild
 docker-rebuild: ## Force rebuild without cache.
-	docker compose build --no-cache
+	docker compose $(COMPOSE_ENV_FILES) build --no-cache
 
 # ---- Help ----
 

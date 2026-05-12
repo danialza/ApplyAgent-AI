@@ -99,7 +99,9 @@ def llm_status() -> dict:
     try:
         # 1-token ping. If this returns anything, the API key + URL work.
         reply = llm._chat_completion([  # type: ignore[attr-defined]
-            {"role": "system", "content": "Reply with the single word: pong"},
+            # OpenAI requires the literal word "json" in messages when
+            # response_format=json_object is set. Use a JSON-shaped ping.
+            {"role": "system", "content": "Reply with the JSON object {\"ok\": true}."},
             {"role": "user", "content": "ping"},
         ])
         status_dict["reachable"] = bool((reply or "").strip())

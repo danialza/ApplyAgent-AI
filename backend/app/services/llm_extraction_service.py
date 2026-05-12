@@ -207,7 +207,18 @@ def _chat_completion(messages: list[dict[str, str]]) -> str:
     }
     with httpx.Client(timeout=cfg["timeout"]) as client:
         resp = client.post(url, headers=headers, json=payload)
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            # Surface the upstream error body so the user sees WHICH 400:
+            # "invalid API key", "model not found", "json_object not
+            # supported", etc. instead of an opaque httpx exception.
+            try:
+                err = resp.json().get("error", {})
+                msg = err.get("message") or err.get("type") or resp.text[:300]
+            except Exception:  # noqa: BLE001
+                msg = resp.text[:300]
+            raise RuntimeError(
+                f"{resp.status_code} from {url} — {msg}"
+            )
         data = resp.json()
     return data["choices"][0]["message"]["content"]
 
