@@ -107,6 +107,11 @@ class CVLibrary(Base):
     #   [{"label": "Languages", "items": ["Python", "SQL", ...]}, ...]
     skills_groups: Mapped[list[Any]] = mapped_column(JSON, default=list)
 
+    # User-curated stretch skills with 1..5 self-ratings. The renderer
+    # injects matching items into the tailored output above the
+    # Technical Skills grid. See schemas.CompetencyEntry.
+    core_competencies: Mapped[list[Any]] = mapped_column(JSON, default=list)
+
     # All entries below are list[dict] with a stable shape — see schemas.py.
     education: Mapped[list[Any]] = mapped_column(JSON, default=list)
     selected_projects: Mapped[list[Any]] = mapped_column(JSON, default=list)

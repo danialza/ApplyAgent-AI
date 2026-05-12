@@ -54,6 +54,7 @@ from dataclasses import dataclass
 
 from app.models.schemas import (
     CertificationEntry,
+    CompetencyEntry,
     CVHeader,
     CVLibraryBase,
     EducationEntry,
@@ -136,6 +137,7 @@ def parse_cv_markdown(text: str) -> CVLibraryBase:
     publications: list[PublicationEntry] = []
     languages: list[str] = []
     skills_groups: list[SkillGroup] = []
+    core_competencies: list[CompetencyEntry] = []
     summary_lines: list[str] = []
 
     current_entry: dict | None = None
@@ -266,6 +268,11 @@ def parse_cv_markdown(text: str) -> CVLibraryBase:
                         tags=_tags_for_text(body),
                     ))
 
+        elif section == "core_competencies":
+            comp = _parse_competency_line(line)
+            if comp is not None:
+                core_competencies.append(comp)
+
         elif section == "languages":
             if line.startswith("- "):
                 languages.append(_strip_bold(line[2:].strip()))
@@ -274,6 +281,7 @@ def parse_cv_markdown(text: str) -> CVLibraryBase:
 
     out.summary = " ".join(summary_lines).strip()
     out.skills_groups = skills_groups
+    out.core_competencies = core_competencies
     out.education = education
     out.selected_projects = selected
     out.additional_projects = additional
@@ -292,7 +300,9 @@ _SECTION_MAP: dict[str, str] = {
     "profile": "summary",
     "technical skills": "skills",
     "skills": "skills",
-    "core competencies": "skills",
+    "core competencies": "core_competencies",
+    "stretch skills": "core_competencies",
+    "aspirational skills": "core_competencies",
     "education": "education",
     "selected ai projects": "selected_projects",
     "selected projects": "selected_projects",
@@ -313,6 +323,47 @@ _SECTION_MAP: dict[str, str] = {
 
 def _normalise_section(label: str) -> str:
     return _SECTION_MAP.get(label, label)
+
+
+# ---------- Core Competencies line parser ----------
+
+# Accepts any of:
+#   - **Distributed systems**: 4/5 — designed event-driven services
+#   - **Kubernetes**: 3/5
+#   - **Rust** (2/5) — read code, write small CLIs
+#   - Distributed systems: 4/5 — rationale
+#   - Distributed systems (4) — rationale
+_COMP_LINE_RE = re.compile(
+    r"""^\s*-\s*
+        (?:\*\*(?P<bold>[^*]+?)\*\*|(?P<plain>[^:()\-—]+?))
+        \s*
+        (?:[:\(]\s*|\s+)
+        (?P<rating>[1-5])\s*(?:/\s*5)?\s*\)?
+        \s*[:\-—]?\s*
+        (?P<rationale>.*)$
+    """,
+    re.VERBOSE,
+)
+
+
+def _parse_competency_line(line: str) -> CompetencyEntry | None:
+    """Return a CompetencyEntry from a single bullet, or None if the
+    line doesn't match the `name + rating` shape. Lines without a
+    rating are silently skipped — we don't guess; competencies the
+    candidate hasn't graded shouldn't be auto-injected."""
+    m = _COMP_LINE_RE.match(line)
+    if not m:
+        return None
+    name = (m.group("bold") or m.group("plain") or "").strip()
+    if not name:
+        return None
+    try:
+        rating = int(m.group("rating"))
+    except (TypeError, ValueError):
+        return None
+    rating = max(1, min(5, rating))
+    rationale = (m.group("rationale") or "").strip().lstrip("—-:").strip()
+    return CompetencyEntry(name=name, rating=rating, rationale=rationale)
 
 
 # ---------- Title splitters ----------

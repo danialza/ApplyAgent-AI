@@ -31,6 +31,8 @@ the candidate's full name. The last non-empty section must be
 4. **Section names are fixed.** Use exactly these names, in this order:
    - `## Professional Summary`
    - `## Technical Skills`
+   - `## Core Competencies` (optional — only emit when the source CV
+     explicitly lists stretch skills with self-ratings)
    - `## Education`
    - `## Selected Projects`
    - `## Additional Projects`
@@ -83,12 +85,34 @@ years of experience, signature outcome.
 
 ## Technical Skills
 
+Use as many of these canonical groups as the source CV supports. Drop
+any group with zero items. Add a new group only if the source CV
+clearly needs one. Never invent items to fill a group.
+
 - **Languages**: Python, SQL, TypeScript
 - **Frameworks & Libraries**: FastAPI, React, Next.js
-- **Data & Storage**: PostgreSQL, Redis, vector databases
-- **Cloud & DevOps**: Docker, AWS, Git, CI/CD
+- **AI / ML & Data Science**: PyTorch, RAG, embeddings, fine-tuning
+- **Data & Storage**: PostgreSQL, Redis, FAISS, vector databases
+- **APIs & Integration**: REST, GraphQL, gRPC, message queues
+- **Cloud & DevOps**: Docker, AWS, GitHub Actions, CI/CD
+- **Infrastructure & Observability**: Kubernetes, Terraform, Prometheus
+- **Testing & Quality**: pytest, Jest, Playwright
+- **Security**: OAuth2, JWT, secrets management
+- **Tools & Platforms**: Git, Linear, Jira, Figma
+- **Architecture & Patterns**: microservices, event-driven, DDD
+- **Methodologies**: Agile, Scrum, TDD
 - **Domain Skills**: list-specific-to-this-candidate
 - **Soft Skills**: communication, mentoring, stakeholder management
+
+## Core Competencies
+
+Only emit this section when the source CV (or a candidate questionnaire
+the user supplied) explicitly grades stretch skills. Never invent
+ratings. Format `- **Name**: N/5 — short rationale`. Ratings are
+1..5 where 5 = expert and 1 = aspirational.
+
+- **Distributed systems**: 4/5 — designed event-driven services
+- **Kubernetes**: 3/5 — operate dev clusters
 
 ## Education
 

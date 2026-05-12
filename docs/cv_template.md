@@ -30,12 +30,71 @@ Write a 3-4 line summary (first-person implied, no "I"). Lead with your stronges
 
 ## Technical Skills
 
+<!--
+Group skills under bold labels. The matcher and tailored renderer treat
+each group as a separate axis. Use as many or as few groups as you
+need — drop empty ones, add a new one if a JD demands a missing
+category. Canonical groups recruiters look for (in this rough order):
+
+  Languages                — programming languages only
+  Frameworks & Libraries   — web/app frameworks, UI libs
+  AI / ML & Data Science   — models, libraries, techniques (optional)
+  Data & Storage           — DBs, warehouses, caches, vector stores
+  APIs & Integration       — REST, GraphQL, gRPC, queues, webhooks
+  Cloud & DevOps           — cloud providers, containers, CI/CD
+  Infrastructure & Observability  — IaC, orchestration, metrics
+  Testing & Quality        — pytest, Jest, Playwright, linters
+  Security                 — auth, secrets, common standards
+  Tools & Platforms        — Git, Linear/Jira, Figma, Notion
+  Architecture & Patterns  — microservices, event-driven, DDD
+  Methodologies            — Agile, Scrum, TDD, code review
+  Domain Skills            — what you DO, not what you USE
+  Soft Skills              — communication, mentoring, leadership
+
+Keep entries comma-separated. Don't pad with skills you can't defend in
+an interview — the matcher will surface them and ATS scanners weight
+them. Best to list 4–10 items per group, not 30.
+-->
+
 - **Languages**: Python, SQL, JavaScript, TypeScript
-- **Frameworks & Libraries**: FastAPI, React, Next.js
-- **Data & Storage**: PostgreSQL, Redis, vector databases
-- **Cloud & DevOps**: Docker, AWS, Git, CI/CD
+- **Frameworks & Libraries**: FastAPI, React, Next.js, Tailwind
+- **AI / ML & Data Science**: PyTorch, scikit-learn, RAG, embeddings, fine-tuning
+- **Data & Storage**: PostgreSQL, Redis, FAISS, S3, vector databases
+- **APIs & Integration**: REST, GraphQL, gRPC, webhooks, message queues
+- **Cloud & DevOps**: Docker, AWS, GCP, GitHub Actions, CI/CD
+- **Infrastructure & Observability**: Kubernetes, Terraform, Prometheus, Grafana
+- **Testing & Quality**: pytest, Jest, Playwright, code review
+- **Security**: OAuth2, JWT, OWASP top-10, secrets management
+- **Tools & Platforms**: Git, Linear, Jira, Figma, Notion
+- **Architecture & Patterns**: microservices, event-driven, DDD, REST design
+- **Methodologies**: Agile, Scrum, TDD, pair programming
 - **Domain Skills**: list the specific skills the JDs you target actually demand
 - **Soft Skills**: communication, mentoring, stakeholder management
+
+## Core Competencies
+
+<!--
+OPTIONAL but powerful for ATS / JD alignment. Stretch skills you're
+willing to claim on a tailored CV even when no single project bullet
+showcases them. Self-rate each on a 1..5 scale; the tailored renderer
+only injects items whose rating is at or above the per-render
+threshold (default 3) AND whose name matches a JD term. So nothing
+ever auto-appears that you can't defend in an interview.
+
+  5/5 = expert, ship daily
+  4/5 = strong working knowledge, used in real projects
+  3/5 = comfortable, used in side projects / coursework
+  2/5 = familiar with concepts, light hands-on
+  1/5 = aspirational, learning now
+
+Format: `- **Name**: N/5 — short rationale`. The rationale is yours;
+it never lands in the rendered CV, it's just a reminder for you.
+Omit this section entirely if you don't want stretch claims.
+-->
+
+- **Distributed systems**: 4/5 — designed event-driven services at $LASTROLE
+- **Kubernetes**: 3/5 — operate dev clusters, not production
+- **Rust**: 2/5 — read code, write small CLIs
 
 ## Education
 

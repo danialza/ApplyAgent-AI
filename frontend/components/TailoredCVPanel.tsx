@@ -40,6 +40,9 @@ export default function TailoredCVPanel({ onError }: Props) {
   // disabled server-side, the render still succeeds (rule-based fallback)
   // and llm_skip_reason explains the gap in the error banner.
   const [useLlm, setUseLlm] = useState(true);
+  // 1..5. Items in library.core_competencies below this rating stay
+  // hidden in the tailored output. Default 3 hides aspirational claims.
+  const [minCompRating, setMinCompRating] = useState(3);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<RenderCVResponse | null>(null);
 
@@ -236,6 +239,7 @@ export default function TailoredCVPanel({ onError }: Props) {
         max_additional_projects: maxAdditional,
         max_experience: maxExperience,
         use_llm: useLlm,
+        min_competency_rating: minCompRating,
       });
       setResult(data);
       if (data.compile_error && !data.compiled) {
@@ -627,6 +631,23 @@ export default function TailoredCVPanel({ onError }: Props) {
             className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
           />
           Polish with LLM
+        </label>
+        <label
+          className="flex items-center gap-2 text-xs font-medium text-slate-600"
+          title="Minimum 1–5 self-rating for stretch skills in `## Core Competencies` to be injected. Higher = more conservative."
+        >
+          <span>Stretch skills ≥</span>
+          <select
+            value={minCompRating}
+            onChange={(e) => setMinCompRating(Number(e.target.value))}
+            className="rounded border-slate-300 bg-white px-1.5 py-0.5 text-xs"
+          >
+            {[1, 2, 3, 4, 5].map((n) => (
+              <option key={n} value={n}>
+                {n}/5
+              </option>
+            ))}
+          </select>
         </label>
         <button
           type="button"

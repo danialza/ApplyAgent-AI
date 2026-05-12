@@ -288,11 +288,18 @@ export interface CertificationEntry {
   tags: string[];
 }
 
+export interface CompetencyEntry {
+  name: string;
+  rating: number; // 1..5
+  rationale: string;
+}
+
 export interface CVLibrary {
   id: number;
   header: CVHeader;
   summary: string;
   skills_groups: SkillGroup[];
+  core_competencies: CompetencyEntry[];
   education: EducationEntryLib[];
   selected_projects: ProjectEntry[];
   additional_projects: ProjectEntry[];
@@ -310,6 +317,8 @@ export interface RenderCVRequest {
   max_additional_projects?: number;
   max_experience?: number;
   use_llm?: boolean;
+  /** 1..5 — items in `core_competencies` below this rating stay hidden. */
+  min_competency_rating?: number;
 }
 
 export interface LLMStatus {

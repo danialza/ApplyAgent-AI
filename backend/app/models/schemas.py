@@ -446,10 +446,31 @@ class CertificationEntry(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class CompetencyEntry(BaseModel):
+    """User-curated stretch skill the candidate is willing to claim.
+
+    `rating` is a 1..5 self-assessment:
+      5 = expert, ship daily
+      4 = strong working knowledge, used in real projects
+      3 = comfortable, used in side projects / coursework
+      2 = familiar with concepts, light hands-on
+      1 = aspirational, learning now
+
+    The tailored renderer injects competencies whose rating is at or
+    above the request's threshold AND whose name appears in JD vocab.
+    Items rated below the threshold stay hidden so nothing claims
+    something the candidate can't defend in an interview.
+    """
+    name: str
+    rating: int = 3
+    rationale: str = ""
+
+
 class CVLibraryBase(BaseModel):
     header: CVHeader = Field(default_factory=CVHeader)
     summary: str = ""
     skills_groups: list[SkillGroup] = Field(default_factory=list)
+    core_competencies: list[CompetencyEntry] = Field(default_factory=list)
     education: list[EducationEntry] = Field(default_factory=list)
     selected_projects: list[ProjectEntry] = Field(default_factory=list)
     additional_projects: list[ProjectEntry] = Field(default_factory=list)
@@ -484,6 +505,12 @@ class RenderCVRequest(BaseModel):
     # same template. Falls back to the rule-based path on any failure.
     # Requires USE_LLM_EXTRACTION=true + OPENAI_API_KEY.
     use_llm: bool = False
+    # Minimum self-rating (1..5) for items in `core_competencies` to be
+    # injected into the tailored output. Default 3 hides aspirational
+    # items the candidate flagged as "learning now". Raise to 4 for
+    # senior-role applications, lower to 2 if you want the JD to pull
+    # everything you've ever touched.
+    min_competency_rating: int = Field(default=3, ge=1, le=5)
 
 
 class RenderCVResponse(BaseModel):

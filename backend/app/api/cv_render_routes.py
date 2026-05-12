@@ -42,6 +42,7 @@ def _to_out(row: CVLibrary) -> CVLibraryOut:
         header=row.header or {},
         summary=row.summary or "",
         skills_groups=row.skills_groups or [],
+        core_competencies=getattr(row, "core_competencies", None) or [],
         education=row.education or [],
         selected_projects=row.selected_projects or [],
         additional_projects=row.additional_projects or [],
@@ -331,6 +332,7 @@ def render_tailored_cv(
         max_additional_projects=payload.max_additional_projects,
         max_experience=payload.max_experience,
         compile_pdf=payload.compile_pdf,
+        min_competency_rating=payload.min_competency_rating,
     )
 
     # ---- Keyword coverage (career-ops parity). For each JD canonical

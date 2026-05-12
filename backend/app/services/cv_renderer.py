@@ -441,6 +441,7 @@ def render_cv(
     max_additional_projects: int = 3,
     max_experience: int = 4,
     compile_pdf: bool = False,
+    min_competency_rating: int = 3,
 ) -> RenderResult:
     """Render a tailored CV. See module docstring for the pipeline."""
     jd_terms = _jd_terms(job)
@@ -563,6 +564,15 @@ def render_cv(
     for g in library.skills_groups or []:
         for s in g.items or []:
             cv_skill_keys.add(group_key(s))
+    # Stretch competencies — user-curated, rating-gated. They count as
+    # "skills the CV backs" only when the candidate self-rated them at
+    # or above the requested threshold AND the JD asks for them.
+    comp_by_key: dict[str, "CompetencyEntry"] = {}  # type: ignore[name-defined]
+    for c in getattr(library, "core_competencies", None) or []:
+        if int(getattr(c, "rating", 0) or 0) < min_competency_rating:
+            continue
+        comp_by_key[group_key(c.name)] = c
+        cv_skill_keys.add(group_key(c.name))
     grounded = [t for t in jd_terms if group_key(t) in cv_skill_keys][:8]
     if grounded:
         # Render as bold-comma-separated terms; LaTeX escape each term.

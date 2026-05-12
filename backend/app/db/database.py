@@ -40,6 +40,38 @@ def init_db() -> None:
     from app.models import db_models  # noqa: F401  pylint: disable=unused-import,import-outside-toplevel
 
     Base.metadata.create_all(bind=engine)
+    _add_missing_columns()
+
+
+def _add_missing_columns() -> None:
+    """Tiny inline migration for SQLite: `CREATE TABLE` is idempotent
+    but adding columns to an EXISTING table is not. For each new column
+    we ship, check `PRAGMA table_info` and `ALTER TABLE ADD COLUMN`
+    when missing. Prevents users from having to `docker-clean` (and
+    lose CVs/Documents) every time the library schema grows.
+
+    Only runs against SQLite — other backends should use Alembic.
+    """
+    if not DB_URL.startswith("sqlite"):
+        return
+    from sqlalchemy import text
+
+    # (table, column, ddl-type, default literal for ALTER)
+    additions: list[tuple[str, str, str, str]] = [
+        ("cv_library", "core_competencies", "JSON", "'[]'"),
+    ]
+    with engine.begin() as conn:
+        for table, column, ddl_type, default in additions:
+            existing = {
+                row[1]
+                for row in conn.execute(text(f"PRAGMA table_info({table})"))
+            }
+            if column in existing:
+                continue
+            conn.execute(text(
+                f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type} "
+                f"DEFAULT {default}"
+            ))
 
 
 def get_db() -> Generator[Session, None, None]:
