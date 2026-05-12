@@ -330,6 +330,10 @@ export interface RenderCVResponse {
   matched_skills: string[];
   used_llm: boolean;
   llm_skip_reason: string;
+  keyword_coverage: number;
+  keywords_covered: string[];
+  keywords_missing: string[];
+  suggested_filename: string;
 }
 
 export interface AgentRunResponse {

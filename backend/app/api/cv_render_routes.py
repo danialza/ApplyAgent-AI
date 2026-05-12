@@ -267,6 +267,33 @@ def render_tailored_cv(
         compile_pdf=payload.compile_pdf,
     )
 
+    # ---- Keyword coverage (career-ops parity). For each JD canonical
+    # term, did it actually land in the rendered LaTeX? Case-insensitive
+    # substring check is good enough — the bolder uses the same logic.
+    covered: list[str] = []
+    missing: list[str] = []
+    latex_low = result.latex.lower()
+    for term in result.matched_skills:
+        if term.lower() in latex_low:
+            covered.append(term)
+        else:
+            missing.append(term)
+    coverage = (len(covered) / len(result.matched_skills)) if result.matched_skills else 0.0
+
+    # ---- Filename: cv-{first-name-kebab}-{company-kebab}-{YYYY-MM-DD}
+    from datetime import date as _date
+    import re as _re
+
+    def _kebab(s: str) -> str:
+        s = (s or "").strip().lower()
+        s = _re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+        return s or "unknown"
+
+    candidate = _kebab((library_out.header.name or "").split()[0] if library_out.header.name else "")
+    company = _kebab(job.company if job and job.company else "")
+    today = _date.today().isoformat()
+    filename = f"cv-{candidate}-{company}-{today}".replace("--", "-").strip("-")
+
     return RenderCVResponse(
         latex=result.latex,
         pdf_b64=result.pdf_b64,
@@ -276,4 +303,8 @@ def render_tailored_cv(
         matched_skills=result.matched_skills,
         used_llm=used_llm,
         llm_skip_reason=llm_skip_reason,
+        keyword_coverage=round(coverage, 3),
+        keywords_covered=covered,
+        keywords_missing=missing,
+        suggested_filename=filename or "tailored-cv",
     )

@@ -495,6 +495,15 @@ class RenderCVResponse(BaseModel):
     matched_skills: list[str] = Field(default_factory=list)
     used_llm: bool = False
     llm_skip_reason: str = ""
+    # Career-ops parity: report which JD canonical terms made it into the
+    # rendered LaTeX and which didn't, plus a 0-1 coverage ratio. Lets
+    # the UI show "covered 9/12 keywords" instead of guessing.
+    keyword_coverage: float = 0.0
+    keywords_covered: list[str] = Field(default_factory=list)
+    keywords_missing: list[str] = Field(default_factory=list)
+    # Filename composed from candidate + company + date (kebab-case),
+    # matching career-ops's `cv-{candidate}-{company}-{YYYY-MM-DD}.pdf`.
+    suggested_filename: str = ""
 
 
 class GenerateResponse(BaseModel):

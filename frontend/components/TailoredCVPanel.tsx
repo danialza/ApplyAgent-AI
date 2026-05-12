@@ -175,7 +175,8 @@ export default function TailoredCVPanel({ onError }: Props) {
 
   function downloadLatex() {
     if (!result) return;
-    download("tailored_cv.tex", result.latex, "text/plain;charset=utf-8");
+    const name = (result.suggested_filename || "tailored_cv") + ".tex";
+    download(name, result.latex, "text/plain;charset=utf-8");
   }
 
   function downloadPdf() {
@@ -185,7 +186,7 @@ export default function TailoredCVPanel({ onError }: Props) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "tailored_cv.pdf";
+    a.download = (result.suggested_filename || "tailored_cv") + ".pdf";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -592,6 +593,14 @@ function ResultPanel({
           {result.used_llm && (
             <span className="ml-2 rounded-full bg-violet-100 px-2 py-0.5 text-xs text-violet-700">
               LLM-polished
+            </span>
+          )}
+          {result.matched_skills.length > 0 && (
+            <span
+              className="ml-2 rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-700"
+              title={`Covered ${result.keywords_covered.length} of ${result.matched_skills.length} JD canonical terms in the rendered LaTeX.`}
+            >
+              {`Keyword coverage: ${Math.round(result.keyword_coverage * 100)}% (${result.keywords_covered.length}/${result.matched_skills.length})`}
             </span>
           )}
         </p>

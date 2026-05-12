@@ -310,7 +310,7 @@ _LATEX_TEMPLATE = r"""
 <% endfor %>
 <% endif %>
 <% if selected_projects %>
-\section{Selected AI Projects \hrulefill}
+\section{Selected Projects \hrulefill}
 
 <% for p in selected_projects %>
 \begin{onecolentry}
@@ -327,7 +327,7 @@ _LATEX_TEMPLATE = r"""
 <% endfor %>
 <% endif %>
 <% if additional_projects %>
-\section{Additional Technical Projects \hrulefill}
+\section{Additional Projects \hrulefill}
 
 <% for p in additional_projects %>
 \begin{onecolentry}
