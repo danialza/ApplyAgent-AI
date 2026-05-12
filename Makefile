@@ -60,9 +60,14 @@ eval: ## Run extraction + matching evaluators on the synthetic gold set.
 # when one exists. `-f` files are merged in order; later files win.
 COMPOSE_ENV_FILES := $(strip $(if $(wildcard .env),--env-file .env,) $(if $(wildcard .env.ports),--env-file .env.ports,))
 
+# Shell-env pollution sink: `${VAR:-}` in compose YAML prefers the
+# CALLING shell's value over .env, including when shell set it to
+# empty. Unset every var compose interpolates so .env always wins.
+COMPOSE_UNSET := unset OPENAI_API_KEY OPENAI_BASE_URL LLM_MODEL_NAME ANTHROPIC_API_KEY ANTHROPIC_BASE_URL ANTHROPIC_MODEL LLM_PROVIDER USE_LLM_EXTRACTION LLM_TIMEOUT_SECONDS NEXT_PUBLIC_API_URL BACKEND_CORS_ORIGINS APP_LOG_LEVEL APP_EMBEDDING_MODEL FRONTEND_PORT BACKEND_PORT 2>/dev/null;
+
 .PHONY: docker-up
 docker-up: ## Build and start all services on default ports (3000 / 8000).
-	docker compose $(COMPOSE_ENV_FILES) up --build -d
+	$(COMPOSE_UNSET) docker compose $(COMPOSE_ENV_FILES) up --build -d
 	@echo ""
 	@echo "Backend  → http://localhost:8000  (docs at /docs)"
 	@echo "Frontend → http://localhost:3000"
@@ -70,26 +75,26 @@ docker-up: ## Build and start all services on default ports (3000 / 8000).
 .PHONY: docker-up-auto
 docker-up-auto: ## Auto-pick free host ports if 3000 / 8000 are taken.
 	@bash scripts/pick-ports.sh --write
-	@docker compose $(COMPOSE_ENV_FILES) up --build -d
+	@$(COMPOSE_UNSET) docker compose $(COMPOSE_ENV_FILES) up --build -d
 	@echo ""
 	@grep '^FRONTEND_PORT' .env.ports | sed 's|FRONTEND_PORT=|Frontend → http://localhost:|'
 	@grep '^BACKEND_PORT'  .env.ports | sed 's|BACKEND_PORT=|Backend  → http://localhost:|'
 
 .PHONY: docker-down
 docker-down: ## Stop services and remove containers (volumes preserved).
-	docker compose $(COMPOSE_ENV_FILES) down
+	$(COMPOSE_UNSET) docker compose $(COMPOSE_ENV_FILES) down
 
 .PHONY: docker-logs
 docker-logs: ## Tail combined backend + frontend logs.
-	docker compose $(COMPOSE_ENV_FILES) logs -f --tail=100
+	$(COMPOSE_UNSET) docker compose $(COMPOSE_ENV_FILES) logs -f --tail=100
 
 .PHONY: docker-clean
 docker-clean: ## Stop services AND remove volumes (deletes DB, uploads, index).
-	docker compose $(COMPOSE_ENV_FILES) down -v
+	$(COMPOSE_UNSET) docker compose $(COMPOSE_ENV_FILES) down -v
 
 .PHONY: docker-rebuild
 docker-rebuild: ## Force rebuild without cache.
-	docker compose $(COMPOSE_ENV_FILES) build --no-cache
+	$(COMPOSE_UNSET) docker compose $(COMPOSE_ENV_FILES) build --no-cache
 
 # ---- Help ----
 
