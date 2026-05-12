@@ -109,5 +109,15 @@ Write a 3-4 line summary (first-person implied, no "I"). Lead with your stronges
 
 ## Languages
 
-- **English**: Native / Fluent / Working / Limited
-- **Other Language**: level
+<!--
+Free-form list, one language per line. Conventions you can mix:
+  * Plain levels:  Native / Fluent / Professional working / Limited / Elementary
+  * CEFR scale:    A1 / A2 / B1 / B2 / C1 / C2
+  * ILR scale:     0 / 1 / 2 / 3 / 4 / 5
+  * Certifications: add in parens, e.g. "IELTS 8.0", "DALF C1", "JLPT N2"
+-->
+
+- **English**: Professional working proficiency (IELTS 7.5)
+- **Spanish**: C1 — Fluent
+- **Mandarin**: B1 — Working
+- **Native language(s)**: Persian / Farsi
