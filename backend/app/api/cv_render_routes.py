@@ -28,6 +28,7 @@ from app.services.codex_cv_polish import polish_library_with_llm
 from app.services.cv_library_builder import build_library_from_all, build_library_from_cv
 from app.services.cv_markdown_converter import convert_cv_text_to_markdown
 from app.services.cv_markdown_parser import parse_cv_markdown
+from app.services.cv_core_competencies import generate_competencies
 from app.services.cv_renderer import render_cv
 from app.services.cv_section_planner import plan_sections
 from app.services.extraction import extract_job
@@ -326,6 +327,16 @@ def render_tailored_cv(
         else:
             llm_skip_reason = skip
 
+    # ---- Synthesise Core Competencies row via LLM when polish is on.
+    # Career-ops methodology: 6–8 compound noun phrases at the
+    # candidate × JD intersection. Falls back to the heuristic
+    # (JD ∩ skills_groups single-token match) when LLM is off or fails.
+    core_competencies_override: list[str] | None = None
+    if payload.use_llm and job is not None:
+        core_competencies_override = generate_competencies(
+            library=library_out, job=job, want=8,
+        )
+
     # ---- Pick section caps. Page target + (optional) LLM decide.
     plan = plan_sections(
         target_length=payload.target_length,
@@ -344,6 +355,7 @@ def render_tailored_cv(
         max_experience=plan.max_experience,
         compile_pdf=payload.compile_pdf,
         min_competency_rating=payload.min_competency_rating,
+        core_competencies_override=core_competencies_override,
     )
 
     # ---- Keyword coverage (career-ops parity). For each JD canonical
@@ -393,4 +405,5 @@ def render_tailored_cv(
             "source": plan.source,
             "rationale": plan.rationale,
         },
+        core_competencies=core_competencies_override or [],
     )

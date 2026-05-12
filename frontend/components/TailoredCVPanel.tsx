@@ -968,6 +968,24 @@ function ResultPanel({
         </div>
       </header>
 
+      {result.core_competencies && result.core_competencies.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Core competencies (LLM-synthesised, career-ops grid)
+          </p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {result.core_competencies.map((c) => (
+              <span
+                key={c}
+                className="rounded-md bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-800 ring-1 ring-teal-200"
+              >
+                {c}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {result.matched_skills.length > 0 && (
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">

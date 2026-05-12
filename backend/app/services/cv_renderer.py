@@ -442,6 +442,7 @@ def render_cv(
     max_experience: int = 4,
     compile_pdf: bool = False,
     min_competency_rating: int = 3,
+    core_competencies_override: list[str] | None = None,
 ) -> RenderResult:
     """Render a tailored CV. See module docstring for the pipeline."""
     jd_terms = _jd_terms(job)
@@ -573,7 +574,14 @@ def render_cv(
             continue
         comp_by_key[group_key(c.name)] = c
         cv_skill_keys.add(group_key(c.name))
-    grounded = [t for t in jd_terms if group_key(t) in cv_skill_keys][:8]
+    # LLM-synthesised compound phrases (career-ops Core Competencies
+    # row) win when the route passes them in. Falls back to the simple
+    # JD ∩ CV-skills intersection — which only catches single-token
+    # matches like "Python", "C++".
+    if core_competencies_override:
+        grounded = [p for p in core_competencies_override if p][:8]
+    else:
+        grounded = [t for t in jd_terms if group_key(t) in cv_skill_keys][:8]
     if grounded:
         # Render as bold-comma-separated terms; LaTeX escape each term.
         core_competencies = " \\quad{}|\\quad{} ".join(

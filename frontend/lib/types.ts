@@ -355,6 +355,7 @@ export interface RenderCVResponse {
   keywords_missing: string[];
   suggested_filename: string;
   section_plan?: SectionPlanOut;
+  core_competencies?: string[];
 }
 
 export interface AgentRunResponse {

@@ -542,6 +542,10 @@ class RenderCVResponse(BaseModel):
     # What the section planner actually chose, so the UI can show
     # "Auto picked 3 / 2 / 3 — mid-level JD, fits two pages".
     section_plan: dict = Field(default_factory=dict)
+    # Career-ops Core Competencies row that landed in the LaTeX.
+    # Empty when no JD or LLM off (the heuristic intersection is used
+    # instead, and you can read what was bolded from `matched_skills`).
+    core_competencies: list[str] = Field(default_factory=list)
 
 
 class GenerateResponse(BaseModel):
