@@ -202,6 +202,78 @@ def test_orchestrator_uses_llm_when_available() -> None:
         _disable()
 
 
+def test_anthropic_provider_selected_when_only_anthropic_key_set() -> None:
+    """No OPENAI_API_KEY but ANTHROPIC_API_KEY → provider auto-flips."""
+    os.environ["USE_LLM_EXTRACTION"] = "true"
+    os.environ.pop("OPENAI_API_KEY", None)
+    os.environ["ANTHROPIC_API_KEY"] = "test-anthropic-key"
+    try:
+        assert llm.is_enabled() is True
+        cfg = llm._config()
+        assert cfg["provider"] == "anthropic"
+        assert cfg["api_key"] == "test-anthropic-key"
+        assert "anthropic.com" in cfg["base_url"]
+    finally:
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        _disable()
+
+
+def test_anthropic_dispatch_builds_correct_payload() -> None:
+    """The Anthropic helper splits system/messages, adds JSON-only
+    instruction, prefills `{`, and hits the Messages API."""
+    captured: dict = {}
+
+    class _FakeResp:
+        status_code = 200
+        def json(self):
+            return {"content": [{"type": "text", "text": '"ok": true}'}]}
+
+    class _FakeClient:
+        def __init__(self, **kw): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def post(self, url, headers=None, json=None):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["payload"] = json
+            return _FakeResp()
+
+    import httpx as _httpx
+    original_client = _httpx.Client
+    _httpx.Client = _FakeClient  # type: ignore[assignment]
+    try:
+        cfg = {
+            "provider": "anthropic",
+            "api_key": "test-anthropic-key",
+            "base_url": "https://api.anthropic.com/v1",
+            "model": "claude-haiku-4-5",
+            "timeout": 10.0,
+        }
+        reply = llm._chat_completion_anthropic(
+            [
+                {"role": "system", "content": "you are a parser"},
+                {"role": "user", "content": "parse this"},
+            ],
+            cfg,
+        )
+    finally:
+        _httpx.Client = original_client  # type: ignore[assignment]
+
+    # URL is the Messages endpoint, not /chat/completions.
+    assert captured["url"].endswith("/messages")
+    # Anthropic-specific headers.
+    assert captured["headers"]["x-api-key"] == "test-anthropic-key"
+    assert captured["headers"]["anthropic-version"] == llm.ANTHROPIC_API_VERSION
+    # System message lifted out; remaining messages have user + assistant
+    # (the prefilled `{`).
+    payload = captured["payload"]
+    assert payload["system"] == "you are a parser"
+    assert payload["messages"][-1] == {"role": "assistant", "content": "{"}
+    assert "JSON only" in payload["messages"][-2]["content"]
+    # The helper re-prepends `{` so callers see a complete object.
+    assert reply.startswith("{") and reply.endswith("}")
+
+
 def _run_all() -> None:
     tests = [
         test_disabled_when_flag_off,
@@ -216,6 +288,8 @@ def _run_all() -> None:
         test_orchestrator_uses_heuristic_when_disabled,
         test_orchestrator_falls_back_when_llm_returns_none,
         test_orchestrator_uses_llm_when_available,
+        test_anthropic_provider_selected_when_only_anthropic_key_set,
+        test_anthropic_dispatch_builds_correct_payload,
     ]
     failed = 0
     for t in tests:

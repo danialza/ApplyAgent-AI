@@ -115,19 +115,21 @@ def llm_status() -> dict:
         "enabled": llm.is_enabled(),
         "configured": False,
         "reachable": False,
+        "provider": "",
         "model": "",
         "base_url": "",
         "error": "",
     }
     if not llm.is_enabled():
         status_dict["error"] = (
-            "LLM disabled — set USE_LLM_EXTRACTION=true + OPENAI_API_KEY "
-            "in .env and restart containers."
+            "LLM disabled — set USE_LLM_EXTRACTION=true and either "
+            "OPENAI_API_KEY or ANTHROPIC_API_KEY in .env, then restart."
         )
         return status_dict
 
     cfg = llm._config()  # type: ignore[attr-defined]
     status_dict["configured"] = True
+    status_dict["provider"] = cfg.get("provider", "")
     status_dict["model"] = cfg.get("model", "")
     status_dict["base_url"] = cfg.get("base_url", "")
 

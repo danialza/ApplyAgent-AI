@@ -34,8 +34,14 @@ services:
 
       # Optional LLM extraction (off by default).
       USE_LLM_EXTRACTION: ${USE_LLM_EXTRACTION:-}
+      # Provider switch — leave blank to auto-detect from whichever key
+      # is set. Explicit values: `openai` or `anthropic`.
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
       LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
       LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
 

@@ -33,6 +33,10 @@ from app.services.job_parser import ParsedJob
 logger = logging.getLogger("ai_job_cv_matcher.llm")
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
+DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5"
+ANTHROPIC_API_VERSION = "2023-06-01"
+ANTHROPIC_MAX_TOKENS = 4096
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_TIMEOUT = 30.0
 
@@ -166,15 +170,53 @@ def _truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _detect_provider() -> str:
+    """Pick the active provider.
+
+    Priority:
+      1. Explicit `LLM_PROVIDER=openai|anthropic` env if set.
+      2. Auto-detect from which API key is present.
+      3. Default to openai if both keys are set (or neither — caller checks).
+    """
+    explicit = (os.getenv("LLM_PROVIDER") or "").strip().lower()
+    if explicit in {"openai", "anthropic"}:
+        return explicit
+    has_oa = bool(os.getenv("OPENAI_API_KEY"))
+    has_an = bool(os.getenv("ANTHROPIC_API_KEY"))
+    if has_an and not has_oa:
+        return "anthropic"
+    return "openai"
+
+
 def is_enabled() -> bool:
-    """True iff `USE_LLM_EXTRACTION` is truthy AND an API key is present."""
+    """True iff `USE_LLM_EXTRACTION` is truthy AND an API key is present
+    for the active provider."""
     if not _truthy(os.getenv("USE_LLM_EXTRACTION")):
         return False
+    provider = _detect_provider()
+    if provider == "anthropic":
+        return bool(os.getenv("ANTHROPIC_API_KEY"))
     return bool(os.getenv("OPENAI_API_KEY"))
 
 
 def _config() -> dict[str, Any]:
+    provider = _detect_provider()
+    if provider == "anthropic":
+        return {
+            "provider": "anthropic",
+            "api_key": os.getenv("ANTHROPIC_API_KEY", ""),
+            "base_url": (os.getenv("ANTHROPIC_BASE_URL") or DEFAULT_ANTHROPIC_BASE_URL).rstrip("/"),
+            # Reuse LLM_MODEL_NAME so users with one var override both
+            # providers, then fall back to ANTHROPIC_MODEL, then default.
+            "model": (
+                os.getenv("ANTHROPIC_MODEL")
+                or os.getenv("LLM_MODEL_NAME")
+                or DEFAULT_ANTHROPIC_MODEL
+            ),
+            "timeout": float(os.getenv("LLM_TIMEOUT_SECONDS") or DEFAULT_TIMEOUT),
+        }
     return {
+        "provider": "openai",
         "api_key": os.getenv("OPENAI_API_KEY", ""),
         "base_url": (os.getenv("OPENAI_BASE_URL") or DEFAULT_BASE_URL).rstrip("/"),
         "model": os.getenv("LLM_MODEL_NAME") or DEFAULT_MODEL,
@@ -186,14 +228,25 @@ def _config() -> dict[str, Any]:
 
 # Indirection so tests can monkeypatch the network layer without httpx.
 def _chat_completion(messages: list[dict[str, str]]) -> str:
-    """POST to /chat/completions and return the assistant message text.
+    """POST to the configured chat endpoint, return the assistant text.
 
-    Uses `response_format={"type": "json_object"}` to encourage strict JSON
-    output on supporting models. Raises on any non-2xx / network failure.
+    Dispatches by provider:
+      - openai: /chat/completions with `response_format=json_object`.
+      - anthropic: /v1/messages with system+messages split, JSON enforced
+        by an explicit "respond with JSON only" suffix on the user prompt
+        plus a prefilled assistant turn with "{" to force JSON output.
+
+    Raises with the upstream error body on any non-2xx.
     """
+    cfg = _config()
+    if cfg["provider"] == "anthropic":
+        return _chat_completion_anthropic(messages, cfg)
+    return _chat_completion_openai(messages, cfg)
+
+
+def _chat_completion_openai(messages: list[dict[str, str]], cfg: dict[str, Any]) -> str:
     import httpx  # local import — keeps module importable when httpx absent
 
-    cfg = _config()
     url = f"{cfg['base_url']}/chat/completions"
     headers = {
         "Authorization": f"Bearer {cfg['api_key']}",
@@ -221,6 +274,81 @@ def _chat_completion(messages: list[dict[str, str]]) -> str:
             )
         data = resp.json()
     return data["choices"][0]["message"]["content"]
+
+
+def _chat_completion_anthropic(messages: list[dict[str, str]], cfg: dict[str, Any]) -> str:
+    """Anthropic Messages API call.
+
+    Differences from OpenAI:
+      * `system` is a top-level field, not a message-with-role.
+      * Only `user` / `assistant` roles inside `messages`.
+      * No `response_format=json_object` — JSON is enforced two ways:
+        (1) append an explicit "Respond with valid JSON only." line to
+            the last user message;
+        (2) pre-fill an assistant turn with `{` so the model must
+            continue from inside an object.
+      * Response text lives at `content[0].text`, not `choices[0]…`.
+    """
+    import httpx  # local import — same pattern as the OpenAI path
+
+    # Split system from user/assistant messages.
+    system_parts = [m["content"] for m in messages if m.get("role") == "system"]
+    chat_messages = [m for m in messages if m.get("role") != "system"]
+    if not chat_messages:
+        # Anthropic requires at least one user message.
+        raise RuntimeError("Anthropic call needs at least one non-system message.")
+
+    # Strengthen the JSON-only instruction on the final user turn so the
+    # model doesn't ramble in prose.
+    last = dict(chat_messages[-1])
+    last["content"] = (
+        (last.get("content") or "")
+        + "\n\nRespond with valid JSON only. No markdown, no prose."
+    )
+    chat_messages = chat_messages[:-1] + [last]
+
+    # Pre-fill the assistant turn with `{` so the model continues mid-
+    # JSON. We strip the prefill back on the response.
+    prefill = "{"
+    chat_messages = chat_messages + [{"role": "assistant", "content": prefill}]
+
+    url = f"{cfg['base_url']}/messages"
+    headers = {
+        "x-api-key": cfg["api_key"],
+        "anthropic-version": ANTHROPIC_API_VERSION,
+        "Content-Type": "application/json",
+    }
+    payload: dict[str, Any] = {
+        "model": cfg["model"],
+        "max_tokens": ANTHROPIC_MAX_TOKENS,
+        "messages": chat_messages,
+        "temperature": 0.1,
+    }
+    if system_parts:
+        payload["system"] = "\n\n".join(system_parts)
+
+    with httpx.Client(timeout=cfg["timeout"]) as client:
+        resp = client.post(url, headers=headers, json=payload)
+        if resp.status_code >= 400:
+            try:
+                err = resp.json().get("error", {})
+                msg = err.get("message") or err.get("type") or resp.text[:300]
+            except Exception:  # noqa: BLE001
+                msg = resp.text[:300]
+            raise RuntimeError(f"{resp.status_code} from {url} — {msg}")
+        data = resp.json()
+    # Concatenate any text blocks in `content`. Most replies are one block.
+    parts = [
+        b.get("text", "")
+        for b in (data.get("content") or [])
+        if b.get("type") == "text"
+    ]
+    body = "".join(parts).strip()
+    # Re-attach the prefilled `{` so downstream JSON parsing sees a
+    # complete object.
+    if not body.startswith("{"):
+        body = prefill + body
+    return body
 
 
 def _coerce_json(raw: str) -> dict[str, Any] | None:

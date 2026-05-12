@@ -316,6 +316,7 @@ export interface LLMStatus {
   enabled: boolean;
   configured: boolean;
   reachable: boolean;
+  provider: string;
   model: string;
   base_url: string;
   error: string;

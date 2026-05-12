@@ -513,7 +513,7 @@ function LLMStatusBanner({
   if (status) {
     if (status.reachable) {
       tone = "emerald";
-      label = `LLM connected · ${status.model}`;
+      label = `LLM connected · ${status.provider || "?"} · ${status.model}`;
       detail = status.base_url || "(default OpenAI endpoint)";
     } else if (status.enabled) {
       tone = "amber";
