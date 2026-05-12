@@ -29,6 +29,7 @@ from app.services.cv_library_builder import build_library_from_all, build_librar
 from app.services.cv_markdown_converter import convert_cv_text_to_markdown
 from app.services.cv_markdown_parser import parse_cv_markdown
 from app.services.cv_renderer import render_cv
+from app.services.cv_section_planner import plan_sections
 from app.services.extraction import extract_job
 
 router = APIRouter(prefix="/api/cv", tags=["cv"])
@@ -325,12 +326,22 @@ def render_tailored_cv(
         else:
             llm_skip_reason = skip
 
+    # ---- Pick section caps. Page target + (optional) LLM decide.
+    plan = plan_sections(
+        target_length=payload.target_length,
+        library=library_out,
+        job=job,
+        user_max_selected=payload.max_selected_projects,
+        user_max_additional=payload.max_additional_projects,
+        user_max_experience=payload.max_experience,
+    )
+
     result = render_cv(
         library_out,
         job=job,
-        max_selected_projects=payload.max_selected_projects,
-        max_additional_projects=payload.max_additional_projects,
-        max_experience=payload.max_experience,
+        max_selected_projects=plan.max_selected_projects,
+        max_additional_projects=plan.max_additional_projects,
+        max_experience=plan.max_experience,
         compile_pdf=payload.compile_pdf,
         min_competency_rating=payload.min_competency_rating,
     )
@@ -375,4 +386,11 @@ def render_tailored_cv(
         keywords_covered=covered,
         keywords_missing=missing,
         suggested_filename=filename or "tailored-cv",
+        section_plan={
+            "max_selected_projects": plan.max_selected_projects,
+            "max_additional_projects": plan.max_additional_projects,
+            "max_experience": plan.max_experience,
+            "source": plan.source,
+            "rationale": plan.rationale,
+        },
     )

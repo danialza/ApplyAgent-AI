@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -496,10 +496,18 @@ class RenderCVRequest(BaseModel):
     """
     job_text: str = ""
     compile_pdf: bool = False
-    # Caps applied per section after JD-relevance ranking.
-    max_selected_projects: int = Field(default=4, ge=0, le=20)
-    max_additional_projects: int = Field(default=3, ge=0, le=20)
-    max_experience: int = Field(default=4, ge=0, le=20)
+    # Page-target picker drives section caps so users don't have to
+    # guess raw numbers. "one_page" = junior caps, "two_page" = senior
+    # caps, "auto" asks the LLM to pick based on JD seniority + CV
+    # density and falls back to "two_page" when LLM is off. The raw
+    # max_* fields below still work and OVERRIDE the picker — leave
+    # them at their defaults to follow the picker.
+    target_length: Literal["auto", "one_page", "two_page"] = "auto"
+    # Caps applied per section after JD-relevance ranking. -1 = "use
+    # whatever the planner picks". Explicit non-negative values override.
+    max_selected_projects: int = Field(default=-1, ge=-1, le=20)
+    max_additional_projects: int = Field(default=-1, ge=-1, le=20)
+    max_experience: int = Field(default=-1, ge=-1, le=20)
     # Career-ops style LLM polish: rewrite Summary + reformulate bullets
     # using JD vocabulary, then plug the polished content through the
     # same template. Falls back to the rule-based path on any failure.
@@ -531,6 +539,9 @@ class RenderCVResponse(BaseModel):
     # Filename composed from candidate + company + date (kebab-case),
     # matching career-ops's `cv-{candidate}-{company}-{YYYY-MM-DD}.pdf`.
     suggested_filename: str = ""
+    # What the section planner actually chose, so the UI can show
+    # "Auto picked 3 / 2 / 3 — mid-level JD, fits two pages".
+    section_plan: dict = Field(default_factory=dict)
 
 
 class GenerateResponse(BaseModel):

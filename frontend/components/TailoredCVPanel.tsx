@@ -32,9 +32,15 @@ export default function TailoredCVPanel({ onError }: Props) {
   const [library, setLibrary] = useState<CVLibrary | null>(null);
   const [loadingLibrary, setLoadingLibrary] = useState(true);
   const [jobText, setJobText] = useState("");
-  const [maxSelected, setMaxSelected] = useState(4);
-  const [maxAdditional, setMaxAdditional] = useState(3);
-  const [maxExperience, setMaxExperience] = useState(4);
+  // Page-target picker — drives section caps. The numeric overrides
+  // below are -1 by default, meaning "follow whatever the planner
+  // picked". Power users can flip the Advanced disclosure to pin
+  // exact numbers.
+  const [targetLength, setTargetLength] = useState<"auto" | "one_page" | "two_page">("auto");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [maxSelected, setMaxSelected] = useState(-1);
+  const [maxAdditional, setMaxAdditional] = useState(-1);
+  const [maxExperience, setMaxExperience] = useState(-1);
   const [compilePdf, setCompilePdf] = useState(true);
   // Default ON: most users hit "Render" expecting tailoring. If LLM is
   // disabled server-side, the render still succeeds (rule-based fallback)
@@ -240,6 +246,7 @@ export default function TailoredCVPanel({ onError }: Props) {
         max_experience: maxExperience,
         use_llm: useLlm,
         min_competency_rating: minCompRating,
+        target_length: targetLength,
       });
       setResult(data);
       if (data.compile_error && !data.compiled) {
@@ -606,11 +613,53 @@ export default function TailoredCVPanel({ onError }: Props) {
         />
       </div>
 
-      {/* Knobs */}
+      {/* Page-target picker — replaces guess-the-numbers knobs. The
+          planner clamps everything against the library size, so e.g.
+          "two pages" never claims 5 projects when you only have 3. */}
       <div className="flex flex-wrap items-end gap-3">
-        <NumberKnob label="Selected" value={maxSelected} setValue={setMaxSelected} max={20} />
-        <NumberKnob label="Additional" value={maxAdditional} setValue={setMaxAdditional} max={20} />
-        <NumberKnob label="Experience" value={maxExperience} setValue={setMaxExperience} max={20} />
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-slate-600">Target length</span>
+          <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-semibold shadow-sm">
+            {([
+              ["one_page", "1 page"],
+              ["two_page", "2 pages"],
+              ["auto", "Auto (LLM)"],
+            ] as const).map(([val, lbl]) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setTargetLength(val)}
+                className={
+                  "rounded-md px-2.5 py-1 transition " +
+                  (targetLength === val
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-600 hover:bg-slate-100")
+                }
+                title={
+                  val === "auto"
+                    ? "LLM picks caps from JD seniority + your library. Falls back to 2 pages if LLM is off."
+                    : val === "one_page"
+                    ? "Junior / early-career preset: 2 selected · 1 additional · 2 experience"
+                    : "Senior / mid preset: 5 selected · 3 additional · 4 experience"
+                }
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+        </div>
+        {result?.section_plan && (
+          <p className="max-w-xs text-[11px] text-slate-500">
+            Planner chose{" "}
+            <span className="font-semibold text-slate-700">
+              {result.section_plan.max_selected_projects}/
+              {result.section_plan.max_additional_projects}/
+              {result.section_plan.max_experience}
+            </span>{" "}
+            ({result.section_plan.source}).{" "}
+            {result.section_plan.rationale}
+          </p>
+        )}
         <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
           <input
             type="checkbox"
@@ -658,6 +707,46 @@ export default function TailoredCVPanel({ onError }: Props) {
           {busy ? "Rendering…" : "Render tailored CV"}
         </button>
       </div>
+
+      {/* Advanced override — pin exact counts and skip the planner for
+          that field. -1 means "follow planner". */}
+      <details
+        open={advancedOpen}
+        onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}
+        className="rounded-lg border border-slate-200 bg-white p-2 text-xs"
+      >
+        <summary className="cursor-pointer select-none font-medium text-slate-600">
+          Advanced · override section caps
+        </summary>
+        <div className="mt-2 flex flex-wrap items-end gap-3">
+          <p className="basis-full text-[11px] text-slate-500">
+            Set any field to <code>-1</code> to follow the target-length
+            planner, or pin an exact count. Pinned fields skip the
+            planner for that section.
+          </p>
+          <NumberKnob
+            label="Selected (-1 = auto)"
+            value={maxSelected}
+            setValue={setMaxSelected}
+            min={-1}
+            max={20}
+          />
+          <NumberKnob
+            label="Additional (-1 = auto)"
+            value={maxAdditional}
+            setValue={setMaxAdditional}
+            min={-1}
+            max={20}
+          />
+          <NumberKnob
+            label="Experience (-1 = auto)"
+            value={maxExperience}
+            setValue={setMaxExperience}
+            min={-1}
+            max={20}
+          />
+        </div>
+      </details>
 
       {!library && !loadingLibrary && (
         <p className="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-500">
@@ -794,23 +883,25 @@ function NumberKnob({
   value,
   setValue,
   max,
+  min = 0,
 }: {
   label: string;
   value: number;
   setValue: (v: number) => void;
   max: number;
+  min?: number;
 }) {
   return (
     <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
       <span>{label}</span>
       <input
         type="number"
-        min={0}
+        min={min}
         max={max}
         value={value}
         onChange={(e) => {
           const n = parseInt(e.target.value, 10);
-          if (Number.isFinite(n)) setValue(Math.min(max, Math.max(0, n)));
+          if (Number.isFinite(n)) setValue(Math.min(max, Math.max(min, n)));
         }}
         className="w-20 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200"
       />

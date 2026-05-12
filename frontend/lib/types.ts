@@ -319,6 +319,16 @@ export interface RenderCVRequest {
   use_llm?: boolean;
   /** 1..5 — items in `core_competencies` below this rating stay hidden. */
   min_competency_rating?: number;
+  /** Page-target picker. "auto" asks the LLM to choose caps. */
+  target_length?: "auto" | "one_page" | "two_page";
+}
+
+export interface SectionPlanOut {
+  max_selected_projects: number;
+  max_additional_projects: number;
+  max_experience: number;
+  source: string; // "user_override" | "one_page" | "two_page" | "llm" | "llm_fallback"
+  rationale: string;
 }
 
 export interface LLMStatus {
@@ -344,6 +354,7 @@ export interface RenderCVResponse {
   keywords_covered: string[];
   keywords_missing: string[];
   suggested_filename: string;
+  section_plan?: SectionPlanOut;
 }
 
 export interface AgentRunResponse {
