@@ -268,6 +268,8 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
 
   async function handleTrack(skip: boolean) {
     if (!result) return;
+    // Attach the tailored CV snapshot for non-Skipped rows. For
+    // Skipped rows there's no point storing the CV — saves DB bytes.
     const payload = {
       apply_date: skip ? "" : new Date().toISOString().slice(0, 10),
       deadline: "",
@@ -278,6 +280,9 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
       url: extractUrlFromText(jobText) || "",
       notes: "",
       jd_text: jobText.trim(),
+      cv_latex: skip ? "" : result.latex || "",
+      cv_pdf_b64: skip ? "" : result.pdf_b64 || "",
+      cv_filename: skip ? "" : result.suggested_filename || "tailored-cv",
     };
     try {
       await createApplication(payload);

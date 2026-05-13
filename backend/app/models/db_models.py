@@ -155,6 +155,13 @@ class Application(Base):
     jd_hash: Mapped[str] = mapped_column(String(40), nullable=False, default="", index=True)
     jd_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Tailored CV snapshot at the time the application was tracked.
+    # Stored so the user can re-download .tex / .pdf months later from
+    # the tracker without re-rendering. PDF kept as base64 to match
+    # the render endpoint contract; ~200 KB per row is fine.
+    cv_latex: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    cv_pdf_b64: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    cv_filename: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )

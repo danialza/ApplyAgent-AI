@@ -16,6 +16,7 @@ matched=false.
 """
 from __future__ import annotations
 
+import base64
 import csv
 import hashlib
 import io
@@ -23,7 +24,7 @@ import re
 from datetime import datetime, date
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session
 
@@ -59,6 +60,29 @@ def _today_iso() -> str:
     return date.today().isoformat()
 
 
+def _to_out(row: Application) -> ApplicationOut:
+    """ORM → Pydantic with derived `has_cv_*` flags so list endpoints
+    don't have to ship the (possibly hundreds-of-KB) tailored CV
+    payload to the UI every refresh."""
+    return ApplicationOut(
+        id=row.id,
+        apply_date=row.apply_date or "",
+        deadline=row.deadline or "",
+        company=row.company or "",
+        role=row.role or "",
+        status=row.status or "",
+        how=row.how or "",
+        url=row.url or "",
+        notes=row.notes or "",
+        jd_hash=row.jd_hash or "",
+        has_cv_latex=bool(getattr(row, "cv_latex", "") or ""),
+        has_cv_pdf=bool(getattr(row, "cv_pdf_b64", "") or ""),
+        cv_filename=getattr(row, "cv_filename", "") or "",
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
 # ---------- list / create ----------
 
 @router.get("", response_model=list[ApplicationOut])
@@ -66,7 +90,7 @@ def list_applications(db: Session = Depends(get_db)) -> list[ApplicationOut]:
     rows = (
         db.query(Application).order_by(desc(Application.created_at)).all()
     )
-    return [ApplicationOut.model_validate(r) for r in rows]
+    return [_to_out(r) for r in rows]
 
 
 @router.post("", response_model=ApplicationOut, status_code=status.HTTP_201_CREATED)
@@ -92,11 +116,14 @@ def create_application(
         notes=payload.notes,
         jd_text=payload.jd_text,
         jd_hash=hash_jd(payload.jd_text),
+        cv_latex=payload.cv_latex or "",
+        cv_pdf_b64=payload.cv_pdf_b64 or "",
+        cv_filename=payload.cv_filename or "",
     )
     db.add(row)
     db.commit()
     db.refresh(row)
-    return ApplicationOut.model_validate(row)
+    return _to_out(row)
 
 
 @router.patch("/{app_id}", response_model=ApplicationOut)
@@ -113,7 +140,7 @@ def update_application(
         setattr(row, k, v)
     db.commit()
     db.refresh(row)
-    return ApplicationOut.model_validate(row)
+    return _to_out(row)
 
 
 @router.delete("/{app_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -123,6 +150,44 @@ def delete_application(app_id: int, db: Session = Depends(get_db)) -> None:
         return
     db.delete(row)
     db.commit()
+
+
+# ---------- tailored-CV download ----------
+
+@router.get("/{app_id}/cv.tex")
+def download_cv_latex(app_id: int, db: Session = Depends(get_db)) -> Response:
+    """Serve the LaTeX snapshot attached when the row was tracked."""
+    row = db.query(Application).filter(Application.id == app_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    if not (row.cv_latex or "").strip():
+        raise HTTPException(status_code=404, detail="No CV attached to this application.")
+    filename = (row.cv_filename or "tailored-cv") + ".tex"
+    return Response(
+        content=row.cv_latex,
+        media_type="application/x-tex; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/{app_id}/cv.pdf")
+def download_cv_pdf(app_id: int, db: Session = Depends(get_db)) -> Response:
+    """Serve the compiled PDF (base64-decoded) attached when tracked."""
+    row = db.query(Application).filter(Application.id == app_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    if not (row.cv_pdf_b64 or "").strip():
+        raise HTTPException(status_code=404, detail="No PDF attached to this application.")
+    try:
+        pdf_bytes = base64.b64decode(row.cv_pdf_b64)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Bad PDF payload: {exc}") from exc
+    filename = (row.cv_filename or "tailored-cv") + ".pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 # ---------- dedupe check ----------
@@ -151,7 +216,7 @@ def check_duplicate(
             return ApplicationDuplicateMatch(
                 matched=True,
                 match_kind="url",
-                application=ApplicationOut.model_validate(row),
+                application=_to_out(row),
             )
 
     # 2. JD hash.
@@ -162,7 +227,7 @@ def check_duplicate(
             return ApplicationDuplicateMatch(
                 matched=True,
                 match_kind="jd_hash",
-                application=ApplicationOut.model_validate(row),
+                application=_to_out(row),
             )
 
     # 3. Company + role fuzzy (lower-case, trimmed).
@@ -175,7 +240,7 @@ def check_duplicate(
                 return ApplicationDuplicateMatch(
                     matched=True,
                     match_kind="company_role",
-                    application=ApplicationOut.model_validate(r),
+                    application=_to_out(r),
                 )
 
     return ApplicationDuplicateMatch(matched=False)

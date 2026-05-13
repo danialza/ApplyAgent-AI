@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import {
+  applicationCvPdfUrl,
+  applicationCvTexUrl,
   applicationsCsvUrl,
   deleteApplication,
   listApplications,
@@ -131,6 +133,7 @@ export default function ApplicationsPanel({ onError, refreshKey = 0 }: Props) {
                 <th className="px-2 py-1.5">Status</th>
                 <th className="px-2 py-1.5">How</th>
                 <th className="px-2 py-1.5">Link</th>
+                <th className="px-2 py-1.5">CV</th>
                 <th className="px-2 py-1.5">Notes</th>
                 <th className="px-2 py-1.5"></th>
               </tr>
@@ -197,18 +200,50 @@ export default function ApplicationsPanel({ onError, refreshKey = 0 }: Props) {
                       )}
                     </select>
                   </td>
-                  <td className="max-w-[12rem] px-2 py-1.5">
-                    {r.url ? (
+                  <td className="max-w-[14rem] px-2 py-1.5">
+                    <div className="flex items-center gap-1">
+                      <TextCell
+                        value={r.url}
+                        onChange={(v) => patch(r.id, "url", v)}
+                        placeholder="-"
+                      />
+                      {r.url && (
+                        <a
+                          href={r.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="shrink-0 rounded border border-slate-200 px-1 text-[10px] text-slate-600 hover:bg-slate-50"
+                          title="Open in new tab"
+                        >
+                          ↗
+                        </a>
+                      )}
+                    </div>
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-1.5">
+                    {r.has_cv_pdf && (
                       <a
-                        href={r.url}
+                        href={applicationCvPdfUrl(r.id)}
                         target="_blank"
                         rel="noreferrer"
-                        className="block truncate text-brand-700 hover:underline"
-                        title={r.url}
+                        className="mr-1 rounded border border-rose-300 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 hover:bg-rose-50"
+                        title="Download the tailored PDF snapshot"
                       >
-                        {r.url}
+                        PDF
                       </a>
-                    ) : (
+                    )}
+                    {r.has_cv_latex && (
+                      <a
+                        href={applicationCvTexUrl(r.id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+                        title="Download the tailored .tex source"
+                      >
+                        TeX
+                      </a>
+                    )}
+                    {!r.has_cv_latex && !r.has_cv_pdf && (
                       <span className="text-slate-400">-</span>
                     )}
                   </td>

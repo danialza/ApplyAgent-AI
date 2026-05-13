@@ -11,14 +11,21 @@ export interface Application {
   url: string;
   notes: string;
   jd_hash: string;
+  has_cv_latex: boolean;
+  has_cv_pdf: boolean;
+  cv_filename: string;
   created_at: string;
   updated_at: string;
 }
 
 export type ApplicationCreate = Omit<
   Application,
-  "id" | "created_at" | "updated_at" | "jd_hash"
-> & { jd_text?: string };
+  "id" | "created_at" | "updated_at" | "jd_hash" | "has_cv_latex" | "has_cv_pdf"
+> & {
+  jd_text?: string;
+  cv_latex?: string;
+  cv_pdf_b64?: string;
+};
 
 export type ApplicationUpdate = Partial<
   Omit<Application, "id" | "created_at" | "updated_at" | "jd_hash">

@@ -275,4 +275,12 @@ export function applicationsCsvUrl(): string {
   return `${API_BASE}/api/applications/export.csv`;
 }
 
+export function applicationCvTexUrl(id: number): string {
+  return `${API_BASE}/api/applications/${id}/cv.tex`;
+}
+
+export function applicationCvPdfUrl(id: number): string {
+  return `${API_BASE}/api/applications/${id}/cv.pdf`;
+}
+
 export { ApiError, API_BASE };

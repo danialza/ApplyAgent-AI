@@ -59,6 +59,9 @@ def _add_missing_columns() -> None:
     # (table, column, ddl-type, default literal for ALTER)
     additions: list[tuple[str, str, str, str]] = [
         ("cv_library", "core_competencies", "JSON", "'[]'"),
+        ("applications", "cv_latex", "TEXT", "''"),
+        ("applications", "cv_pdf_b64", "TEXT", "''"),
+        ("applications", "cv_filename", "VARCHAR(255)", "''"),
     ]
     with engine.begin() as conn:
         for table, column, ddl_type, default in additions:

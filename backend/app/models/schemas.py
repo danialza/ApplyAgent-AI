@@ -673,8 +673,12 @@ class ApplicationBase(BaseModel):
 
 class ApplicationCreate(ApplicationBase):
     """Body for POST /api/applications. jd_text optional; backend
-    hashes it for dedupe and stores."""
+    hashes it for dedupe and stores. cv_* fields attach the tailored
+    CV snapshot so the row can re-download .tex/.pdf later."""
     jd_text: str = ""
+    cv_latex: str = ""
+    cv_pdf_b64: str = ""
+    cv_filename: str = ""
 
 
 class ApplicationUpdate(BaseModel):
@@ -692,6 +696,12 @@ class ApplicationUpdate(BaseModel):
 class ApplicationOut(ApplicationBase):
     id: int
     jd_hash: str = ""
+    # Booleans the UI can read without pulling the (potentially large)
+    # tailored CV payload over the wire on every list refresh. The
+    # actual content is served via /api/applications/{id}/cv.tex|cv.pdf.
+    has_cv_latex: bool = False
+    has_cv_pdf: bool = False
+    cv_filename: str = ""
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)
