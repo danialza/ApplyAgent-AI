@@ -117,6 +117,37 @@ def _jd_terms(job: JobParsed | None) -> list[str]:
     return out
 
 
+# Quantified-impact metrics inside bullets. Recruiters scan numbers
+# first — career-ops bolds these to anchor the eye. Conservative
+# patterns only, never bold a bare integer (years count as "1") to
+# avoid noise.
+_METRIC_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\b\d+(?:\.\d+)?\\?%"),                       # 30%, 12.5%
+    re.compile(r"\b\d+(?:\.\d+)?x\b", re.IGNORECASE),         # 10x, 2.5x
+    re.compile(r"[\$€£]\s?\d+(?:\.\d+)?[KMB]?\b"),            # $10K, €1.2M
+    re.compile(r"\b\d+\+?\s*years?\b", re.IGNORECASE),        # 5+ years
+    re.compile(r"\b\d+\+?\s*(?:users|requests?/s|req/s|MAU|DAU|QPS|RPS)\b", re.IGNORECASE),
+    re.compile(r"\b\d+\s*(?:ms|s|GB|TB|MB)\b", re.IGNORECASE),
+]
+
+
+def _bold_metrics(text: str) -> str:
+    """Wrap each quantified metric in `\\textbf{…}`. Skips matches that
+    already sit inside an existing `\\textbf{…}` so we don't nest."""
+    def _replace(m: re.Match[str]) -> str:
+        s, e = m.span()
+        # Look at a small window around the match to detect we're not
+        # already inside \textbf{…}.
+        window_start = max(0, s - 12)
+        if r"\textbf{" in text[window_start:s]:
+            return m.group(0)
+        return r"\textbf{" + m.group(0) + r"}"
+
+    for pat in _METRIC_PATTERNS:
+        text = pat.sub(_replace, text)
+    return text
+
+
 def _bold_terms(jd_canonicals: list[str]) -> list[str]:
     """Expand canonical JD skills to every alias the synonym dictionary knows.
 
@@ -348,7 +379,7 @@ _LATEX_TEMPLATE = r"""
 
 <% for x in experience %>
 \begin{onecolentry}
-\textbf{<< x.title | latex >>}<% if x.company %>, << x.company | latex >><% endif %> \hfill << x.period | latex >>
+\textbf{<< x.title | latex >>}<% if x.company %> — \textbf{<< x.company | latex >>}<% endif %> \hfill << x.period | latex >>
 <% if x.highlights %>
 \begin{highlights}
 <% for h in x.highlights %>
@@ -490,8 +521,14 @@ def render_cv(
 
     # ---- Bold + escape all bullet text in one pass.
     def render_bullet(text: str) -> str:
+        # Order matters: JD-skill bolding runs against the escaped
+        # text first, then metric bolding catches quantified impact
+        # (5+ years, 30%, $1M, 10x). _bold_metrics is nest-safe so
+        # it won't double-wrap a number that happens to be inside a
+        # skill term that was already bolded.
         escaped = latex_escape(text)
-        return _bold_matches(escaped, bold_terms)
+        escaped = _bold_matches(escaped, bold_terms)
+        return _bold_metrics(escaped)
 
     def render_skill_items(items: list[str]) -> str:
         # Skills line: bold matched ones; leave separators plain.
@@ -535,7 +572,10 @@ def render_cv(
         for c in entries:
             issuer = latex_escape(c.issuer).strip()
             name = render_bullet(c.name)
-            line = (issuer + ": " + name) if issuer else name
+            # Issuer is the scan anchor (AWS, Google, Coursera) so bold
+            # it just like the publication status. Falls through to the
+            # plain name when no issuer was parsed.
+            line = (rf"\textbf{{{issuer}:}} " + name) if issuer else name
             out.append({"line": line})
         return out
 
@@ -550,7 +590,19 @@ def render_cv(
             out.append({"line": line})
         return out
 
-    languages_line = ", ".join(latex_escape(l) for l in (library.languages or []))
+    # Languages line — bold each language name. Source entries arrive
+    # in one of two shapes after parsing:
+    #   "English: Native"            → bold "English"
+    #   "Native language(s): Farsi"  → bold "Native language(s)"
+    #   plain "English"              → bold the whole token
+    def _render_lang(raw: str) -> str:
+        s = raw.strip()
+        if ":" in s:
+            name, _, rest = s.partition(":")
+            return rf"\textbf{{{latex_escape(name.strip())}}}: {latex_escape(rest.strip())}"
+        return rf"\textbf{{{latex_escape(s)}}}"
+
+    languages_line = ", ".join(_render_lang(l) for l in (library.languages or []))
 
     skills_groups_payload = [
         {"label": g.label, "items_rendered": render_skill_items(g.items)}
