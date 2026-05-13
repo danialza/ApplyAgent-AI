@@ -1,5 +1,36 @@
 // Mirrors backend pydantic schemas. Keep in sync with backend/app/models/schemas.py.
 
+export interface Application {
+  id: number;
+  apply_date: string;   // ISO "YYYY-MM-DD" or ""
+  deadline: string;
+  company: string;
+  role: string;
+  status: string;       // "To-Apply" | "Applied" | "Interview" | "Offer" | "Rejected" | "Skipped" | custom
+  how: string;          // "form" | "indeed" | "linkedin" | "referral" | custom
+  url: string;
+  notes: string;
+  jd_hash: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ApplicationCreate = Omit<
+  Application,
+  "id" | "created_at" | "updated_at" | "jd_hash"
+> & { jd_text?: string };
+
+export type ApplicationUpdate = Partial<
+  Omit<Application, "id" | "created_at" | "updated_at" | "jd_hash">
+>;
+
+export interface DuplicateCheck {
+  matched: boolean;
+  match_kind: string;   // "" | "url" | "jd_hash" | "company_role"
+  application: Application | null;
+}
+
+
 export interface CV {
   id: number;
   filename: string;
@@ -355,6 +386,8 @@ export interface RenderCVResponse {
   keywords_missing: string[];
   suggested_filename: string;
   section_plan?: SectionPlanOut;
+  job_title?: string;
+  job_company?: string;
   core_competencies?: string[];
 }
 

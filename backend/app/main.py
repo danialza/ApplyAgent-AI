@@ -19,6 +19,7 @@ logging.basicConfig(
 
 from app.api import (
     agent_routes,
+    application_routes,
     cv_render_routes,
     cv_routes,
     embeddings_routes,
@@ -73,3 +74,4 @@ app.include_router(tailor_routes.router)
 app.include_router(agent_routes.router)
 app.include_router(generate_routes.router)
 app.include_router(cv_render_routes.router)
+app.include_router(application_routes.router)

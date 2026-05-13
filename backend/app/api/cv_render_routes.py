@@ -406,4 +406,6 @@ def render_tailored_cv(
             "rationale": plan.rationale,
         },
         core_competencies=core_competencies_override or [],
+        job_title=(job.job_title if job is not None else ""),
+        job_company=(job.company if job is not None else ""),
     )

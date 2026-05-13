@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import {
   buildLibraryFromCV,
+  checkDuplicateApplication,
   convertCVTextToMarkdown,
+  createApplication,
   deleteCVLibrary,
   fetchCVLibrary,
   fetchCVTemplate,
@@ -14,10 +16,19 @@ import {
   renderCV,
   uploadMarkdownCV,
 } from "@/lib/api";
-import type { CV, CVLibrary, LLMStatus, RenderCVResponse } from "@/lib/types";
+import type {
+  Application,
+  CV,
+  CVLibrary,
+  DuplicateCheck,
+  LLMStatus,
+  RenderCVResponse,
+} from "@/lib/types";
 
 interface Props {
   onError: (message: string) => void;
+  /** Bump tracker panel after we create or skip an application. */
+  onApplicationTracked?: () => void;
 }
 
 const SECTION_LABELS: Record<string, string> = {
@@ -28,7 +39,7 @@ const SECTION_LABELS: Record<string, string> = {
   certifications: "Certifications",
 };
 
-export default function TailoredCVPanel({ onError }: Props) {
+export default function TailoredCVPanel({ onError, onApplicationTracked }: Props) {
   const [library, setLibrary] = useState<CVLibrary | null>(null);
   const [loadingLibrary, setLoadingLibrary] = useState(true);
   const [jobText, setJobText] = useState("");
@@ -234,9 +245,56 @@ export default function TailoredCVPanel({ onError }: Props) {
     };
   }, [onError]);
 
+  // Dedupe state — re-checked before every render so the "already
+  // tracked" banner reflects the JD currently in the textarea.
+  const [duplicate, setDuplicate] = useState<DuplicateCheck | null>(null);
+  // Once we've actually tracked / skipped this render, hide the
+  // tracker buttons to avoid double-inserts.
+  const [trackedForThisRender, setTrackedForThisRender] = useState(false);
+
+  async function refreshDuplicateCheck(jdText: string, url: string) {
+    if (!jdText.trim() && !url.trim()) {
+      setDuplicate(null);
+      return;
+    }
+    try {
+      const d = await checkDuplicateApplication({ jd_text: jdText, url });
+      setDuplicate(d.matched ? d : null);
+    } catch {
+      // Silent — dedupe is advisory, not blocking.
+      setDuplicate(null);
+    }
+  }
+
+  async function handleTrack(skip: boolean) {
+    if (!result) return;
+    const payload = {
+      apply_date: skip ? "" : new Date().toISOString().slice(0, 10),
+      deadline: "",
+      company: result.job_company || "",
+      role: result.job_title || "",
+      status: skip ? "Skipped" : "To-Apply",
+      how: "",
+      url: extractUrlFromText(jobText) || "",
+      notes: "",
+      jd_text: jobText.trim(),
+    };
+    try {
+      await createApplication(payload);
+      setTrackedForThisRender(true);
+      onApplicationTracked?.();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Track failed.");
+    }
+  }
+
   async function handleRender() {
     setBusy(true);
     setResult(null);
+    setTrackedForThisRender(false);
+    // Run dedupe check in parallel with render so the warning lands
+    // alongside the result without adding latency.
+    refreshDuplicateCheck(jobText.trim(), extractUrlFromText(jobText) || "");
     try {
       const data = await renderCV({
         job_text: jobText.trim(),
@@ -757,6 +815,29 @@ export default function TailoredCVPanel({ onError }: Props) {
         </p>
       )}
 
+      {/* Duplicate-application warning — shown when the JD or its URL
+          matches a row we already tracked. Advisory; does NOT block
+          rendering, since the user might want to update an existing
+          application or re-render a tailored CV. */}
+      {duplicate && duplicate.matched && duplicate.application && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+          <p className="font-semibold">
+            ⚠ Already tracked ({duplicate.match_kind.replace("_", " ")})
+          </p>
+          <p>
+            You added this on{" "}
+            <strong>
+              {duplicate.application.apply_date ||
+                duplicate.application.created_at.slice(0, 10)}
+            </strong>{" "}
+            as <strong>{duplicate.application.role || "—"}</strong> at{" "}
+            <strong>{duplicate.application.company || "—"}</strong> ·
+            current status:{" "}
+            <strong>{duplicate.application.status}</strong>.
+          </p>
+        </div>
+      )}
+
       {/* Results */}
       {result && (
         <ResultPanel
@@ -765,8 +846,57 @@ export default function TailoredCVPanel({ onError }: Props) {
           onDownloadPdf={downloadPdf}
         />
       )}
+
+      {/* Tracker actions — only after a successful render with a JD.
+          Master-CV renders (no JD) have nothing to track. */}
+      {result && jobText.trim() && !trackedForThisRender && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
+          <p className="text-slate-700">
+            Track this job?{" "}
+            {result.job_title || result.job_company ? (
+              <>
+                <strong>{result.job_title || "—"}</strong> at{" "}
+                <strong>{result.job_company || "—"}</strong>
+              </>
+            ) : (
+              <span className="text-slate-500">(JD title not parsed)</span>
+            )}
+          </p>
+          <div className="ml-auto flex gap-2">
+            <button
+              type="button"
+              onClick={() => handleTrack(false)}
+              className="rounded-md border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+            >
+              Track this application
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTrack(true)}
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              title="Mark as Skipped so the dedupe check warns you next time, but keep it out of your active list."
+            >
+              Not interested
+            </button>
+          </div>
+        </div>
+      )}
+      {trackedForThisRender && (
+        <p className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs text-emerald-800">
+          ✓ Added to tracker (section 6).
+        </p>
+      )}
     </div>
   );
+}
+
+// Pull the first http(s) URL out of pasted JD text. Many job boards
+// paste the URL above or below the description; treating that as
+// the application URL lets the dedupe check work even before the
+// user fills in the tracker row.
+function extractUrlFromText(text: string): string {
+  const m = (text || "").match(/https?:\/\/[^\s)\]]+/i);
+  return m ? m[0] : "";
 }
 
 // ---------- LLM status banner ----------

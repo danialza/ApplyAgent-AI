@@ -7,6 +7,7 @@ import ErrorMessage from "@/components/ErrorMessage";
 import LoadingState from "@/components/LoadingState";
 import ManualJobInput from "@/components/ManualJobInput";
 import MatchResults from "@/components/MatchResults";
+import ApplicationsPanel from "@/components/ApplicationsPanel";
 import TailoredCVPanel from "@/components/TailoredCVPanel";
 import UploadedCVList from "@/components/UploadedCVList";
 import { listCVs, matchAll } from "@/lib/api";
@@ -18,6 +19,9 @@ export default function HomePage() {
   const [matching, setMatching] = useState(false);
   const [results, setResults] = useState<RankedMatchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bumped whenever section 5 adds a row to the tracker so section 6
+  // refetches the list without polling.
+  const [trackerRefreshKey, setTrackerRefreshKey] = useState(0);
 
   // Initial load: pull existing CVs (so refresh keeps state).
   useEffect(() => {
@@ -160,7 +164,23 @@ export default function HomePage() {
             LaTeX/PDF in your preferred format.
           </p>
         </div>
-        <TailoredCVPanel onError={setError} />
+        <TailoredCVPanel
+          onError={setError}
+          onApplicationTracked={() => setTrackerRefreshKey((n) => n + 1)}
+        />
+      </section>
+
+      <section className="card space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">6. Applications tracker</h2>
+          <p className="text-sm text-slate-500">
+            Career-ops style sheet — every JD you render gets a row.
+            Edit any cell inline; export the whole list as CSV when you
+            want to back it up or share. Section 5 warns when you paste
+            a JD you&apos;ve already tracked.
+          </p>
+        </div>
+        <ApplicationsPanel onError={setError} refreshKey={trackerRefreshKey} />
       </section>
 
       <footer className="pt-6 text-center text-xs text-slate-400">

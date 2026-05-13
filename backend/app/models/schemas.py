@@ -542,6 +542,9 @@ class RenderCVResponse(BaseModel):
     # What the section planner actually chose, so the UI can show
     # "Auto picked 3 / 2 / 3 — mid-level JD, fits two pages".
     section_plan: dict = Field(default_factory=dict)
+    # Parsed JD fields the tracker UI uses to prefill a new row.
+    job_title: str = ""
+    job_company: str = ""
     # Career-ops Core Competencies row that landed in the LaTeX.
     # Empty when no JD or LLM off (the heuristic intersection is used
     # instead, and you can read what was bolded from `matched_skills`).
@@ -653,3 +656,50 @@ class BatchMatchResponse(BaseModel):
     rows_processed: int = 0
     rows_skipped: int = 0
     error: str = ""
+
+
+# ---------- Applications tracker ----------
+
+class ApplicationBase(BaseModel):
+    apply_date: str = ""
+    deadline: str = ""
+    company: str = ""
+    role: str = ""
+    status: str = "To-Apply"
+    how: str = ""
+    url: str = ""
+    notes: str = ""
+
+
+class ApplicationCreate(ApplicationBase):
+    """Body for POST /api/applications. jd_text optional; backend
+    hashes it for dedupe and stores."""
+    jd_text: str = ""
+
+
+class ApplicationUpdate(BaseModel):
+    """PATCH body — every field optional."""
+    apply_date: Optional[str] = None
+    deadline: Optional[str] = None
+    company: Optional[str] = None
+    role: Optional[str] = None
+    status: Optional[str] = None
+    how: Optional[str] = None
+    url: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ApplicationOut(ApplicationBase):
+    id: int
+    jd_hash: str = ""
+    created_at: datetime
+    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ApplicationDuplicateMatch(BaseModel):
+    """Returned by GET /api/applications/check when a prior application
+    fingerprint matches the inbound JD/URL."""
+    matched: bool = False
+    match_kind: str = ""   # "url" | "jd_hash" | "company_role"
+    application: Optional[ApplicationOut] = None

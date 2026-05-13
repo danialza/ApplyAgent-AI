@@ -217,4 +217,62 @@ export async function renderCV(body: RenderCVRequest): Promise<RenderCVResponse>
   return handle<RenderCVResponse>(res);
 }
 
+// ---------- Applications tracker ----------
+
+import type { Application, ApplicationCreate, ApplicationUpdate, DuplicateCheck } from "./types";
+
+export async function listApplications(): Promise<Application[]> {
+  const res = await fetch(`${API_BASE}/api/applications`, { cache: "no-store" });
+  return handle<Application[]>(res);
+}
+
+export async function createApplication(body: ApplicationCreate): Promise<Application> {
+  const res = await fetch(`${API_BASE}/api/applications`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<Application>(res);
+}
+
+export async function updateApplication(
+  id: number,
+  patch: ApplicationUpdate
+): Promise<Application> {
+  const res = await fetch(`${API_BASE}/api/applications/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  return handle<Application>(res);
+}
+
+export async function deleteApplication(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/applications/${id}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) {
+    throw new ApiError(`Delete failed (HTTP ${res.status})`, res.status);
+  }
+}
+
+export async function checkDuplicateApplication(args: {
+  url?: string;
+  jd_text?: string;
+  company?: string;
+  role?: string;
+}): Promise<DuplicateCheck> {
+  const qs = new URLSearchParams();
+  if (args.url) qs.set("url", args.url);
+  if (args.jd_text) qs.set("jd_text", args.jd_text);
+  if (args.company) qs.set("company", args.company);
+  if (args.role) qs.set("role", args.role);
+  const res = await fetch(`${API_BASE}/api/applications/check?${qs.toString()}`, {
+    cache: "no-store",
+  });
+  return handle<DuplicateCheck>(res);
+}
+
+export function applicationsCsvUrl(): string {
+  return `${API_BASE}/api/applications/export.csv`;
+}
+
 export { ApiError, API_BASE };

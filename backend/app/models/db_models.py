@@ -124,3 +124,40 @@ class CVLibrary(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
+
+
+class Application(Base):
+    """Application tracker row — career-ops style spreadsheet.
+
+    Columns mirror the user's existing Google Sheet:
+      When / DeadLine / Where? / What? / Status / How / Link
+    Plus jd_hash + jd_text for dedupe ("have I applied to this already?")
+    and free-form notes.
+
+    Status is free-text to allow user-custom values; the UI ships a
+    suggested enum (To-Apply / Applied / Interview / Offer / Rejected /
+    Skipped) but doesn't enforce.
+    """
+    __tablename__ = "applications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # ISO-format YYYY-MM-DD strings so CSV export is trivial. Empty
+    # string means "not set yet" — renders as "-" in the UI/CSV.
+    apply_date: Mapped[str] = mapped_column(String(10), nullable=False, default="")
+    deadline: Mapped[str] = mapped_column(String(10), nullable=False, default="")
+    company: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    role: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(64), nullable=False, default="To-Apply")
+    how: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    url: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
+    # SHA-1 of normalised JD text. Cheap fingerprint for "did I tailor
+    # this exact JD before?" checks. URL match wins when both exist.
+    jd_hash: Mapped[str] = mapped_column(String(40), nullable=False, default="", index=True)
+    jd_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
