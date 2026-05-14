@@ -513,12 +513,17 @@ class RenderCVRequest(BaseModel):
     # same template. Falls back to the rule-based path on any failure.
     # Requires USE_LLM_EXTRACTION=true + OPENAI_API_KEY.
     use_llm: bool = False
-    # Minimum self-rating (1..5) for items in `core_competencies` to be
-    # injected into the tailored output. Default 3 hides aspirational
-    # items the candidate flagged as "learning now". Raise to 4 for
-    # senior-role applications, lower to 2 if you want the JD to pull
-    # everything you've ever touched.
-    min_competency_rating: int = Field(default=3, ge=1, le=5)
+    # Minimum self-rating (1..5) for items in `core_competencies`.
+    # Default 1 = treat every stretch skill as fair game (user
+    # decision: "assume best on all"). The dropdown was removed from
+    # the UI; field kept for API compat.
+    min_competency_rating: int = Field(default=1, ge=1, le=5)
+    # Auto-boost loop: when keyword coverage < this fraction AND
+    # use_llm is on, the renderer asks the LLM to weave missing JD
+    # keywords into existing bullets and re-renders. Loop runs up to
+    # `max_boost_iterations` times. Set target=0 to disable.
+    target_keyword_coverage: float = Field(default=0.80, ge=0.0, le=1.0)
+    max_boost_iterations: int = Field(default=3, ge=0, le=5)
 
 
 class RenderCVResponse(BaseModel):
@@ -549,6 +554,13 @@ class RenderCVResponse(BaseModel):
     # Empty when no JD or LLM off (the heuristic intersection is used
     # instead, and you can read what was bolded from `matched_skills`).
     core_competencies: list[str] = Field(default_factory=list)
+    # Coverage-boost loop telemetry: how many extra LLM passes were
+    # needed to hit `target_keyword_coverage`, and what the booster
+    # did each round. Surfaces in the UI as "Boosted coverage from
+    # 27% → 83% in 2 rounds".
+    coverage_iterations: int = 0
+    coverage_history: list[float] = Field(default_factory=list)
+    coverage_boost_log: list[str] = Field(default_factory=list)
 
 
 class GenerateResponse(BaseModel):

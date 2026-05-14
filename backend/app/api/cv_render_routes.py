@@ -29,6 +29,7 @@ from app.services.cv_library_builder import build_library_from_all, build_librar
 from app.services.cv_markdown_converter import convert_cv_text_to_markdown
 from app.services.cv_markdown_parser import parse_cv_markdown
 from app.services.cv_core_competencies import generate_competencies
+from app.services.cv_coverage_booster import boost_coverage
 from app.services.cv_renderer import render_cv
 from app.services.cv_section_planner import plan_sections
 from app.services.extraction import extract_job
@@ -347,29 +348,92 @@ def render_tailored_cv(
         user_max_experience=payload.max_experience,
     )
 
-    result = render_cv(
-        library_out,
-        job=job,
-        max_selected_projects=plan.max_selected_projects,
-        max_additional_projects=plan.max_additional_projects,
-        max_experience=plan.max_experience,
-        compile_pdf=payload.compile_pdf,
-        min_competency_rating=payload.min_competency_rating,
-        core_competencies_override=core_competencies_override,
-    )
+    def _render_and_score(lib_in):
+        """Render once and return (result, covered, missing, coverage)."""
+        r = render_cv(
+            lib_in,
+            job=job,
+            max_selected_projects=plan.max_selected_projects,
+            max_additional_projects=plan.max_additional_projects,
+            max_experience=plan.max_experience,
+            compile_pdf=False,  # only the final pass compiles PDF
+            min_competency_rating=payload.min_competency_rating,
+            core_competencies_override=core_competencies_override,
+        )
+        latex_low_local = r.latex.lower()
+        cov_list: list[str] = []
+        miss_list: list[str] = []
+        for term in r.matched_skills:
+            if term.lower() in latex_low_local:
+                cov_list.append(term)
+            else:
+                miss_list.append(term)
+        cov_ratio = (len(cov_list) / len(r.matched_skills)) if r.matched_skills else 0.0
+        return r, cov_list, miss_list, cov_ratio
 
-    # ---- Keyword coverage (career-ops parity). For each JD canonical
-    # term, did it actually land in the rendered LaTeX? Case-insensitive
-    # substring check is good enough — the bolder uses the same logic.
-    covered: list[str] = []
-    missing: list[str] = []
-    latex_low = result.latex.lower()
-    for term in result.matched_skills:
-        if term.lower() in latex_low:
-            covered.append(term)
-        else:
-            missing.append(term)
-    coverage = (len(covered) / len(result.matched_skills)) if result.matched_skills else 0.0
+    result, covered, missing, coverage = _render_and_score(library_out)
+    coverage_history: list[float] = [round(coverage, 3)]
+    coverage_boost_log: list[str] = []
+    iterations_done = 0
+
+    # ---- Auto-boost loop: if coverage < target AND we're allowed to
+    # use the LLM AND there's a JD to chase, ask the LLM to weave the
+    # missing keywords into existing bullets, re-render, repeat. Each
+    # round is bounded; we stop on first hit or no-progress.
+    if (
+        payload.use_llm
+        and job is not None
+        and payload.target_keyword_coverage > 0
+        and payload.max_boost_iterations > 0
+        and coverage < payload.target_keyword_coverage
+        and missing
+    ):
+        for _ in range(payload.max_boost_iterations):
+            if coverage >= payload.target_keyword_coverage or not missing:
+                break
+            boosted_lib, log = boost_coverage(
+                library=library_out, job=job, missing_keywords=missing,
+            )
+            coverage_boost_log.extend(log)
+            iterations_done += 1
+            if boosted_lib is library_out:
+                # Booster declined (LLM off / no-op). Don't loop forever.
+                break
+            library_out = boosted_lib
+            result, covered, missing, coverage = _render_and_score(library_out)
+            coverage_history.append(round(coverage, 3))
+            # Stuck? Bail rather than burn LLM calls on a no-progress loop.
+            if len(coverage_history) >= 2 and coverage_history[-1] <= coverage_history[-2]:
+                coverage_boost_log.append("coverage_boost: no progress, stopping")
+                break
+
+    # If we boosted, we skipped PDF compilation each loop — compile now
+    # on the final library so the user gets the latest content.
+    if iterations_done > 0 and payload.compile_pdf:
+        result, covered, missing, coverage = _render_and_score(library_out)
+        # Re-run with compile_pdf=true.
+        result = render_cv(
+            library_out,
+            job=job,
+            max_selected_projects=plan.max_selected_projects,
+            max_additional_projects=plan.max_additional_projects,
+            max_experience=plan.max_experience,
+            compile_pdf=True,
+            min_competency_rating=payload.min_competency_rating,
+            core_competencies_override=core_competencies_override,
+        )
+    elif iterations_done == 0 and payload.compile_pdf:
+        # First-pass render skipped PDF; compile now.
+        result = render_cv(
+            library_out,
+            job=job,
+            max_selected_projects=plan.max_selected_projects,
+            max_additional_projects=plan.max_additional_projects,
+            max_experience=plan.max_experience,
+            compile_pdf=True,
+            min_competency_rating=payload.min_competency_rating,
+            core_competencies_override=core_competencies_override,
+        )
 
     # ---- Filename: cv-{first-name-kebab}-{company-kebab}-{YYYY-MM-DD}
     from datetime import date as _date
@@ -408,4 +472,7 @@ def render_tailored_cv(
         core_competencies=core_competencies_override or [],
         job_title=(job.job_title if job is not None else ""),
         job_company=(job.company if job is not None else ""),
+        coverage_iterations=iterations_done,
+        coverage_history=coverage_history,
+        coverage_boost_log=coverage_boost_log,
     )

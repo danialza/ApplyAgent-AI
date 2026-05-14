@@ -359,6 +359,10 @@ export interface RenderCVRequest {
   min_competency_rating?: number;
   /** Page-target picker. "auto" asks the LLM to choose caps. */
   target_length?: "auto" | "one_page" | "two_page";
+  /** 0..1. If coverage < target, LLM rewrites bullets to weave in missing keywords. */
+  target_keyword_coverage?: number;
+  /** Max boost rounds. 0 disables. */
+  max_boost_iterations?: number;
 }
 
 export interface SectionPlanOut {
@@ -396,6 +400,9 @@ export interface RenderCVResponse {
   job_title?: string;
   job_company?: string;
   core_competencies?: string[];
+  coverage_iterations?: number;
+  coverage_history?: number[];
+  coverage_boost_log?: string[];
 }
 
 export interface AgentRunResponse {

@@ -57,9 +57,10 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
   // disabled server-side, the render still succeeds (rule-based fallback)
   // and llm_skip_reason explains the gap in the error banner.
   const [useLlm, setUseLlm] = useState(true);
-  // 1..5. Items in library.core_competencies below this rating stay
-  // hidden in the tailored output. Default 3 hides aspirational claims.
-  const [minCompRating, setMinCompRating] = useState(3);
+  // Coverage auto-boost target. Renderer loops the LLM up to 3 times
+  // weaving missing JD keywords into existing bullets until coverage
+  // hits this fraction (or the loop stalls).
+  const [coverageTarget, setCoverageTarget] = useState(0.8);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<RenderCVResponse | null>(null);
 
@@ -308,8 +309,12 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
         max_additional_projects: maxAdditional,
         max_experience: maxExperience,
         use_llm: useLlm,
-        min_competency_rating: minCompRating,
+        // Always include every stretch skill; the dropdown was removed
+        // because the LLM Core Competencies + coverage-boost loop now
+        // decide what surfaces, not a per-skill threshold.
+        min_competency_rating: 1,
         target_length: targetLength,
+        target_keyword_coverage: coverageTarget,
       });
       setResult(data);
       if (data.compile_error && !data.compiled) {
@@ -746,17 +751,17 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
         </label>
         <label
           className="flex items-center gap-2 text-xs font-medium text-slate-600"
-          title="Minimum 1–5 self-rating for stretch skills in `## Core Competencies` to be injected. Higher = more conservative."
+          title="If coverage falls below this target, the renderer asks the LLM to weave missing JD keywords into existing bullets and re-renders. Loops up to 3 rounds. Set to 0% to disable."
         >
-          <span>Stretch skills ≥</span>
+          <span>Coverage target</span>
           <select
-            value={minCompRating}
-            onChange={(e) => setMinCompRating(Number(e.target.value))}
+            value={coverageTarget}
+            onChange={(e) => setCoverageTarget(Number(e.target.value))}
             className="rounded border-slate-300 bg-white px-1.5 py-0.5 text-xs"
           >
-            {[1, 2, 3, 4, 5].map((n) => (
+            {[0, 0.6, 0.7, 0.8, 0.9, 0.95].map((n) => (
               <option key={n} value={n}>
-                {n}/5
+                {Math.round(n * 100)}%
               </option>
             ))}
           </select>
@@ -1080,6 +1085,16 @@ function ResultPanel({
               title={`Covered ${result.keywords_covered.length} of ${result.matched_skills.length} JD canonical terms in the rendered LaTeX.`}
             >
               {`Keyword coverage: ${Math.round(result.keyword_coverage * 100)}% (${result.keywords_covered.length}/${result.matched_skills.length})`}
+            </span>
+          )}
+          {result.coverage_iterations && result.coverage_iterations > 0 && (
+            <span
+              className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800"
+              title={(result.coverage_boost_log || []).join("\n")}
+            >
+              {`Boosted ${result.coverage_iterations}× · ${(result.coverage_history || [])
+                .map((c) => `${Math.round(c * 100)}%`)
+                .join(" → ")}`}
             </span>
           )}
         </p>
