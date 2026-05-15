@@ -125,8 +125,9 @@ _METRIC_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b\d+(?:\.\d+)?\\?%"),                       # 30%, 12.5%
     re.compile(r"\b\d+(?:\.\d+)?x\b", re.IGNORECASE),         # 10x, 2.5x
     re.compile(r"[\$€£]\s?\d+(?:\.\d+)?[KMB]?\b"),            # $10K, €1.2M
+    re.compile(r"\b\d+(?:\.\d+)?\s*/\s*\d+(?:\.\d+)?\b"),     # GPA 4.42/5.00
     re.compile(r"\b\d+\+?\s*years?\b", re.IGNORECASE),        # 5+ years
-    re.compile(r"\b\d+\+?\s*(?:users|requests?/s|req/s|MAU|DAU|QPS|RPS)\b", re.IGNORECASE),
+    re.compile(r"\b\d+\+?\s*(?:users|requests?/s|req/s|MAU|DAU|QPS|RPS|participants)\b", re.IGNORECASE),
     re.compile(r"\b\d+\s*(?:ms|s|GB|TB|MB)\b", re.IGNORECASE),
 ]
 
@@ -379,7 +380,7 @@ _LATEX_TEMPLATE = r"""
 
 <% for x in experience %>
 \begin{onecolentry}
-\textbf{<< x.title | latex >>}<% if x.company %> — \textbf{<< x.company | latex >>}<% endif %> \hfill << x.period | latex >>
+\textbf{<< x.title | latex >>}<% if x.company %>, << x.company | latex >><% endif %> \hfill << x.period | latex >>
 <% if x.highlights %>
 \begin{highlights}
 <% for h in x.highlights %>
@@ -571,11 +572,13 @@ def render_cv(
         out = []
         for c in entries:
             issuer = latex_escape(c.issuer).strip()
-            name = render_bullet(c.name)
-            # Issuer is the scan anchor (AWS, Google, Coursera) so bold
-            # it just like the publication status. Falls through to the
-            # plain name when no issuer was parsed.
-            line = (rf"\textbf{{{issuer}:}} " + name) if issuer else name
+            # Career-ops convention: bold the credential NAME, leave
+            # issuer plain. Recruiters search for cert names
+            # ("Azure AI Fundamentals", "Deep Learning Specialisation"),
+            # not the issuing org.
+            name_raw = latex_escape(c.name).strip()
+            name_bold = rf"\textbf{{{name_raw}}}"
+            line = (issuer + ": " + name_bold) if issuer else name_bold
             out.append({"line": line})
         return out
 
