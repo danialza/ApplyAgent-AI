@@ -5,13 +5,15 @@ import {
   addUrlSource,
   deleteCV,
   deleteUrlSource,
+  fetchSourceBreakdown,
   listAllSources,
   refreshUrlSource,
   uploadCVs,
   uploadMarkdownCV,
   API_BASE,
 } from "@/lib/api";
-import type { UnifiedSource } from "@/lib/types";
+import type { SourceBreakdown, UnifiedSource } from "@/lib/types";
+import MasterCVPreview from "./MasterCVPreview";
 
 interface Props {
   onError: (msg: string) => void;
@@ -38,6 +40,8 @@ const KIND_COLOR: Record<UnifiedSource["kind"], string> = {
 
 export default function UnifiedSourcePanel({ onError, onSourcesChanged }: Props) {
   const [sources, setSources] = useState<UnifiedSource[]>([]);
+  const [breakdown, setBreakdown] = useState<SourceBreakdown["by_source"]>({});
+  const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
   const [loading, setLoading] = useState(false);
   const [urlInput, setUrlInput] = useState("");
   const [addingUrl, setAddingUrl] = useState(false);
@@ -48,7 +52,12 @@ export default function UnifiedSourcePanel({ onError, onSourcesChanged }: Props)
   async function refresh() {
     setLoading(true);
     try {
-      setSources(await listAllSources());
+      const [src, bd] = await Promise.all([
+        listAllSources(),
+        fetchSourceBreakdown().catch(() => ({ by_source: {} } as SourceBreakdown)),
+      ]);
+      setSources(src);
+      setBreakdown(bd.by_source);
     } catch (err) {
       onError(err instanceof Error ? err.message : "Load failed.");
     } finally {
@@ -62,7 +71,20 @@ export default function UnifiedSourcePanel({ onError, onSourcesChanged }: Props)
 
   function notifyChanged() {
     refresh();
+    setPreviewRefreshKey((n) => n + 1);
     onSourcesChanged?.();
+  }
+
+  // Build source-key → human label so MasterCVPreview chips read
+  // "Master CV.pdf" / "@danialza" / "Document — notes.txt" instead of
+  // raw "cv:1" identifiers.
+  const sourceLabels: Record<string, string> = {};
+  for (const s of sources) {
+    let key: string;
+    if (s.kind === "cv") key = `cv:${s.id}`;
+    else if (s.kind === "document") key = `document:${s.id}`;
+    else key = `web:${s.id}`;
+    sourceLabels[key] = s.title || key;
   }
 
   async function handleUploadCVs(files: File[]) {
@@ -269,6 +291,27 @@ export default function UnifiedSourcePanel({ onError, onSourcesChanged }: Props)
                   {s.error && (
                     <p className="truncate text-[11px] text-rose-600">⚠ {s.error}</p>
                   )}
+                  {(() => {
+                    const sk =
+                      s.kind === "cv" ? `cv:${s.id}` :
+                      s.kind === "document" ? `document:${s.id}` :
+                      `web:${s.id}`;
+                    const b = breakdown[sk];
+                    if (!b) return null;
+                    const parts: string[] = [];
+                    if (b.selected_projects) parts.push(`${b.selected_projects} selected`);
+                    if (b.additional_projects) parts.push(`${b.additional_projects} additional`);
+                    if (b.experience) parts.push(`${b.experience} exp`);
+                    if (b.publications) parts.push(`${b.publications} pubs`);
+                    if (b.certifications) parts.push(`${b.certifications} certs`);
+                    if (b.education) parts.push(`${b.education} edu`);
+                    if (!parts.length) return null;
+                    return (
+                      <p className="truncate text-[10px] text-emerald-700">
+                        ↳ contributed: {parts.join(" · ")}
+                      </p>
+                    );
+                  })()}
                 </div>
                 <span
                   className={`shrink-0 text-[10px] font-semibold ${
@@ -301,6 +344,19 @@ export default function UnifiedSourcePanel({ onError, onSourcesChanged }: Props)
             ))}
           </ul>
         )}
+      </div>
+
+      {/* Master CV preview — the aggregated output every other section
+          consumes. Source chips on each entry show which uploads
+          contributed; counters at the top show overall volume. */}
+      <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Master CV (auto-built from sources above)
+        </p>
+        <MasterCVPreview
+          refreshKey={previewRefreshKey}
+          sourceLabels={sourceLabels}
+        />
       </div>
     </div>
   );

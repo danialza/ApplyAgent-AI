@@ -424,6 +424,96 @@ def _website_url(portfolio: str) -> str:
 
 # ---------- Public ----------
 
+# ---------- Merge helpers (smart dedup across sources) ----------
+#
+# When the same entry shows up in multiple sources (e.g. a project on
+# both the CV and the candidate's portfolio site), we keep ONE entry
+# and merge the new info in: union tags, append new highlights that
+# aren't substring-duplicates of existing ones, keep the longer period
+# string, and append the new source key to `sources`.
+
+def _dedup_strings(existing: list[str], incoming: list[str]) -> list[str]:
+    """Union of two ordered string lists, case-insensitive, preserving
+    the first occurrence's casing. Substring duplicates (one bullet
+    that's a prefix of another) collapse to the longer one."""
+    out: list[str] = list(existing)
+    seen_lower = {s.strip().lower(): i for i, s in enumerate(out)}
+    for s in incoming:
+        clean = (s or "").strip()
+        if not clean:
+            continue
+        low = clean.lower()
+        if low in seen_lower:
+            # Existing match — replace with longer one if the incoming
+            # is a strict superset.
+            i = seen_lower[low]
+            if len(clean) > len(out[i]):
+                out[i] = clean
+            continue
+        # Check substring containment in either direction.
+        absorbed = False
+        for i, existing_s in enumerate(out):
+            el = existing_s.lower()
+            if el and (el in low or low in el):
+                if len(clean) > len(existing_s):
+                    out[i] = clean
+                    seen_lower[el] = i
+                absorbed = True
+                break
+        if not absorbed:
+            out.append(clean)
+            seen_lower[low] = len(out) - 1
+    return out
+
+
+def _record_source(entry, source_key: str) -> None:
+    """Append `source_key` to `entry.sources` if it isn't already there.
+    Used by every per-section merge helper below."""
+    current = list(getattr(entry, "sources", None) or [])
+    if source_key and source_key not in current:
+        current.append(source_key)
+    entry.sources = current
+
+
+def _merge_education(target: EducationEntry, incoming: EducationEntry, source_key: str) -> None:
+    target.period = target.period or incoming.period
+    target.highlights = _dedup_strings(target.highlights or [], incoming.highlights or [])
+    _record_source(target, source_key)
+
+
+def _merge_experience(target: ExperienceEntryLib, incoming: ExperienceEntryLib, source_key: str) -> None:
+    if incoming.period and len(incoming.period) > len(target.period or ""):
+        target.period = incoming.period
+    target.highlights = _dedup_strings(target.highlights or [], incoming.highlights or [])
+    target.tags = _dedup_strings(target.tags or [], incoming.tags or [])
+    _record_source(target, source_key)
+
+
+def _merge_project(target: ProjectEntry, incoming: ProjectEntry, source_key: str) -> None:
+    if incoming.period and len(incoming.period) > len(target.period or ""):
+        target.period = incoming.period
+    target.highlights = _dedup_strings(target.highlights or [], incoming.highlights or [])
+    target.tags = _dedup_strings(target.tags or [], incoming.tags or [])
+    _record_source(target, source_key)
+
+
+def _merge_cert(target: CertificationEntry, incoming: CertificationEntry, source_key: str) -> None:
+    # Issuer: keep the longer (more specific) string.
+    if incoming.issuer and len(incoming.issuer) > len(target.issuer or ""):
+        target.issuer = incoming.issuer
+    target.tags = _dedup_strings(target.tags or [], incoming.tags or [])
+    _record_source(target, source_key)
+
+
+def _merge_pub(target: PublicationEntry, incoming: PublicationEntry, source_key: str) -> None:
+    if incoming.status and not target.status:
+        target.status = incoming.status
+    if incoming.venue and len(incoming.venue) > len(target.venue or ""):
+        target.venue = incoming.venue
+    target.tags = _dedup_strings(target.tags or [], incoming.tags or [])
+    _record_source(target, source_key)
+
+
 def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
     """Merge every uploaded CV + Document into one library.
 
@@ -510,63 +600,79 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
                 all_skills.append(s)
     skills_groups = _group_skills(all_skills)
 
-    # ----- Education: union across CVs, dedup by institution+degree. -----
+    # ----- Education: merge across sources by institution+degree. -----
+    # When several sources mention the same school, we UNION their
+    # highlights instead of dropping later ones, and track every
+    # contributing source on the merged entry. Same merge protocol
+    # applies to experience, projects, certifications, publications.
     education: list[EducationEntry] = []
-    seen_edu: set[str] = set()
+    edu_index: dict[str, int] = {}
     for cv in cvs:
         for e in _build_education(list(cv.education or [])):
             key = f"{e.institution.lower()}|{e.degree.lower()}"
-            if key not in seen_edu:
-                seen_edu.add(key)
+            sk = f"cv:{cv.id}"
+            if key in edu_index:
+                _merge_education(education[edu_index[key]], e, sk)
+            else:
+                edu_index[key] = len(education)
+                e.sources = [sk]
                 education.append(e)
 
-    # ----- Experience: union, dedup by title+company. -----
-    # Use the raw section block so the bullet-grouping isn't broken by
-    # split_entries' flatten-on-no-blank-line behaviour.
+    # ----- Experience: merge by title+company. -----
     experience: list[ExperienceEntryLib] = []
-    seen_exp: set[str] = set()
+    exp_index: dict[str, int] = {}
     for cv in cvs:
         block = blocks_by_cv[cv.id].get("experience") or ""
+        sk = f"cv:{cv.id}"
         for x in _experience_from_block(block):
             key = f"{x.title.lower()}|{x.company.lower()}"
-            if key not in seen_exp:
-                seen_exp.add(key)
+            if key in exp_index:
+                _merge_experience(experience[exp_index[key]], x, sk)
+            else:
+                exp_index[key] = len(experience)
+                x.sources = [sk]
                 experience.append(x)
 
-    # ----- Projects: prefer the granular split when the CV has both
-    # "Selected …" and "Additional …" headers; else fall back to the
-    # generic `projects` bucket and split by detected-tag density. -----
+    # ----- Projects: merge by title across selected / additional /
+    # generic buckets. Same project from CV + GitHub + portfolio should
+    # appear ONCE with union of tags, highlights, and the longest
+    # period string. -----
     selected_acc: list[ProjectEntry] = []
     additional_acc: list[ProjectEntry] = []
     generic_acc: list[ProjectEntry] = []
-    seen_proj: set[str] = set()
+    proj_index: dict[str, tuple[list[ProjectEntry], int]] = {}
 
-    def _add_proj(target: list[ProjectEntry], projects: list[ProjectEntry]) -> None:
+    def _add_proj(target: list[ProjectEntry], projects: list[ProjectEntry], source_key: str) -> None:
         for p in projects:
-            key = p.title.lower()
-            if not key or key in seen_proj:
+            key = (p.title or "").strip().lower()
+            if not key:
                 continue
-            seen_proj.add(key)
+            if key in proj_index:
+                bucket, idx = proj_index[key]
+                _merge_project(bucket[idx], p, source_key)
+                continue
+            p.sources = [source_key]
+            proj_index[key] = (target, len(target))
             target.append(p)
 
     for cv in cvs:
         blocks = blocks_by_cv[cv.id]
-        _add_proj(selected_acc,    _projects_from_block(blocks.get("selected_projects", "")))
-        _add_proj(additional_acc,  _projects_from_block(blocks.get("additional_projects", "")))
-        _add_proj(generic_acc,     _projects_from_block(blocks.get("projects", "")))
+        sk = f"cv:{cv.id}"
+        _add_proj(selected_acc,    _projects_from_block(blocks.get("selected_projects", "")), sk)
+        _add_proj(additional_acc,  _projects_from_block(blocks.get("additional_projects", "")), sk)
+        _add_proj(generic_acc,     _projects_from_block(blocks.get("projects", "")), sk)
     for d in docs:
         blocks = blocks_by_doc[d.id]
-        _add_proj(selected_acc,    _projects_from_block(blocks.get("selected_projects", "")))
-        _add_proj(additional_acc,  _projects_from_block(blocks.get("additional_projects", "")))
-        _add_proj(generic_acc,     _projects_from_block(blocks.get("projects", "")))
+        sk = f"document:{d.id}"
+        _add_proj(selected_acc,    _projects_from_block(blocks.get("selected_projects", "")), sk)
+        _add_proj(additional_acc,  _projects_from_block(blocks.get("additional_projects", "")), sk)
+        _add_proj(generic_acc,     _projects_from_block(blocks.get("projects", "")), sk)
 
-    # Web sources: turn each LLM-extracted project entry into a
-    # ProjectEntry. GitHub user/repo extractions provide explicit
-    # title/summary/tags; generic portfolio scrapes match the same shape.
-    # All web-source projects land in "additional" since portfolio
-    # write-ups are usually short and not the candidate's flagship work
-    # (CVs already chose what to highlight).
+    # Web sources: LLM-extracted projects fold into the same merge map
+    # so a "TalkingHeadAI" project from both the CV and the candidate's
+    # portfolio shows up once with both sources listed.
     for w in web_sources:
+        sk = f"web:{w.id}"
         for p in (w.extracted or {}).get("projects") or []:
             title = (p.get("title") or "").strip()
             if not title:
@@ -580,7 +686,7 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
                 highlights.append(f"Source: {p['url']}")
             _add_proj(additional_acc, [ProjectEntry(
                 title=title, period="", highlights=highlights, tags=tags[:8],
-            )])
+            )], sk)
 
     if selected_acc or additional_acc:
         # CV provided explicit split — respect it. Generic projects join
@@ -594,43 +700,51 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
         selected = generic_acc[:half]
         additional = generic_acc[half:]
 
-    # ----- Certifications: union, dedup by name. -----
+    # ----- Certifications: merge by name. -----
     certifications: list[CertificationEntry] = []
-    seen_cert: set[str] = set()
+    cert_index: dict[str, int] = {}
     for cv in cvs:
+        sk = f"cv:{cv.id}"
         for c in _build_certifications(list(cv.certifications or [])):
             key = c.name.lower()
-            if key not in seen_cert:
-                seen_cert.add(key)
+            if key in cert_index:
+                _merge_cert(certifications[cert_index[key]], c, sk)
+            else:
+                cert_index[key] = len(certifications)
+                c.sources = [sk]
                 certifications.append(c)
 
-    # ----- Publications: prefer the explicit Publications section block;
-    # fall back to the regex-over-raw-text approach when the CV has no
-    # Publications header. -----
+    # ----- Publications: merge by title across sources + fallback scrape. -----
     publications: list[PublicationEntry] = []
-    seen_pub: set[str] = set()
+    pub_index: dict[str, int] = {}
+
+    def _add_pub(p: PublicationEntry, source_key: str) -> None:
+        key = (p.title or "").strip().lower()
+        if not key:
+            return
+        if key in pub_index:
+            _merge_pub(publications[pub_index[key]], p, source_key)
+            return
+        p.sources = [source_key]
+        pub_index[key] = len(publications)
+        publications.append(p)
+
     for cv in cvs:
         block = blocks_by_cv[cv.id].get("publications") or ""
         for p in _publications_from_block(block):
-            key = p.title.lower()
-            if key and key not in seen_pub:
-                seen_pub.add(key)
-                publications.append(p)
+            _add_pub(p, f"cv:{cv.id}")
     for d in docs:
         block = blocks_by_doc[d.id].get("publications") or ""
         for p in _publications_from_block(block):
-            key = p.title.lower()
-            if key and key not in seen_pub:
-                seen_pub.add(key)
-                publications.append(p)
-    # Final fallback: scrape every raw_text for "Under Submission:" lines
+            _add_pub(p, f"document:{d.id}")
+    # Fallback: scrape every raw_text for "Under Submission:" lines
     # that weren't under a Publications header.
-    for src in cvs + docs:  # type: ignore[operator]
-        for p in _build_publications_from_summary(src.raw_text or ""):
-            key = p.title.lower()
-            if key and key not in seen_pub:
-                seen_pub.add(key)
-                publications.append(p)
+    for cv in cvs:
+        for p in _build_publications_from_summary(cv.raw_text or ""):
+            _add_pub(p, f"cv:{cv.id}")
+    for d in docs:
+        for p in _build_publications_from_summary(d.raw_text or ""):
+            _add_pub(p, f"document:{d.id}")
 
     # ----- Languages: union, dedup by head-token. -----
     languages: list[str] = []

@@ -15,7 +15,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models.db_models import CV, Document, WebSource
+from app.models.db_models import CV, CVLibrary, Document, WebSource
 from app.models.schemas import (
     UnifiedSource,
     WebSourceCreate,
@@ -106,6 +106,48 @@ def list_all_sources(db: Session = Depends(get_db)) -> list[UnifiedSource]:
         ))
     items.sort(key=lambda s: s.created_at, reverse=True)
     return items
+
+
+# ---------- Per-source contribution rollup ----------
+
+@router.get("/breakdown")
+def source_breakdown(db: Session = Depends(get_db)) -> dict:
+    """For each source row (cv:N, document:N, web:N), count how many
+    master-library entries it contributed to. Powers the per-source
+    rollup chips in the unified panel.
+
+    The library entries carry a `sources` list populated by the
+    builder; we just invert it here.
+    """
+    row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is None:
+        return {"by_source": {}}
+
+    def _bucket() -> dict:
+        return {
+            "education": 0,
+            "selected_projects": 0,
+            "additional_projects": 0,
+            "experience": 0,
+            "publications": 0,
+            "certifications": 0,
+        }
+
+    by_source: dict[str, dict] = {}
+
+    def _count(entries: list, section: str) -> None:
+        for e in entries or []:
+            for sk in (e.get("sources") or []) if isinstance(e, dict) else []:
+                by_source.setdefault(sk, _bucket())[section] += 1
+
+    _count(row.education, "education")
+    _count(row.selected_projects, "selected_projects")
+    _count(row.additional_projects, "additional_projects")
+    _count(row.experience, "experience")
+    _count(row.publications, "publications")
+    _count(row.certifications, "certifications")
+
+    return {"by_source": by_source}
 
 
 # ---------- WebSource CRUD ----------

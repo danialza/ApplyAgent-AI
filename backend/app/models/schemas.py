@@ -414,6 +414,11 @@ class EducationEntry(BaseModel):
     degree: str
     period: str = ""
     highlights: list[str] = Field(default_factory=list)
+    # Provenance — list of source keys ("cv:1", "document:3", "web:5")
+    # that contributed to this entry. Multi-element when several
+    # sources mention the same institution+degree and the builder
+    # merged them.
+    sources: list[str] = Field(default_factory=list)
 
 
 class ProjectEntry(BaseModel):
@@ -422,6 +427,7 @@ class ProjectEntry(BaseModel):
     period: str = ""
     highlights: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
 
 
 class ExperienceEntryLib(BaseModel):
@@ -431,6 +437,7 @@ class ExperienceEntryLib(BaseModel):
     period: str = ""
     highlights: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
 
 
 class PublicationEntry(BaseModel):
@@ -438,12 +445,14 @@ class PublicationEntry(BaseModel):
     status: str = ""  # e.g. "Under Submission", "Accepted", "Published"
     venue: str = ""
     tags: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
 
 
 class CertificationEntry(BaseModel):
     issuer: str = ""
     name: str
     tags: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
 
 
 class CompetencyEntry(BaseModel):

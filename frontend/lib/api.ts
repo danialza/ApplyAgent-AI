@@ -306,6 +306,11 @@ export async function refreshUrlSource(id: number): Promise<WebSourceOut> {
   return handle<WebSourceOut>(res);
 }
 
+export async function fetchSourceBreakdown(): Promise<import("./types").SourceBreakdown> {
+  const res = await fetch(`${API_BASE}/api/sources/breakdown`, { cache: "no-store" });
+  return handle<import("./types").SourceBreakdown>(res);
+}
+
 export async function deleteUrlSource(id: number): Promise<void> {
   const res = await fetch(`${API_BASE}/api/sources/url/${id}`, { method: "DELETE" });
   if (!res.ok && res.status !== 404) {

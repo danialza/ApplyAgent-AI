@@ -320,6 +320,7 @@ export interface EducationEntryLib {
   degree: string;
   period: string;
   highlights: string[];
+  sources?: string[];
 }
 
 export interface ProjectEntry {
@@ -327,6 +328,7 @@ export interface ProjectEntry {
   period: string;
   highlights: string[];
   tags: string[];
+  sources?: string[];
 }
 
 export interface ExperienceEntryLib {
@@ -335,6 +337,7 @@ export interface ExperienceEntryLib {
   period: string;
   highlights: string[];
   tags: string[];
+  sources?: string[];
 }
 
 export interface PublicationEntry {
@@ -342,12 +345,25 @@ export interface PublicationEntry {
   status: string;
   venue: string;
   tags: string[];
+  sources?: string[];
 }
 
 export interface CertificationEntry {
   issuer: string;
   name: string;
   tags: string[];
+  sources?: string[];
+}
+
+export interface SourceBreakdown {
+  by_source: Record<string, {
+    education: number;
+    selected_projects: number;
+    additional_projects: number;
+    experience: number;
+    publications: number;
+    certifications: number;
+  }>;
 }
 
 export interface CompetencyEntry {
