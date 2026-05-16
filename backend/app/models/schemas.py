@@ -725,3 +725,39 @@ class ApplicationDuplicateMatch(BaseModel):
     matched: bool = False
     match_kind: str = ""   # "url" | "jd_hash" | "company_role"
     application: Optional[ApplicationOut] = None
+
+
+# ---------- Web sources (portfolio URLs, GitHub) ----------
+
+class WebSourceBase(BaseModel):
+    url: str
+    kind: str = "web"
+    title: str = ""
+    status: str = "pending"
+    error: str = ""
+
+
+class WebSourceCreate(BaseModel):
+    url: str
+
+
+class WebSourceOut(WebSourceBase):
+    id: int
+    has_extracted: bool = False
+    created_at: datetime
+    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---------- Unified source list (CV + Document + WebSource) ----------
+
+class UnifiedSource(BaseModel):
+    """Flat row the unified-uploader UI consumes — every CV, Document,
+    or WebSource the user has added, normalised to the same shape."""
+    id: int
+    kind: str          # "cv" | "document" | "web" | "github_user" | "github_repo"
+    title: str         # filename for CV/Document, host+path for WebSource
+    detail: str        # extra info (e.g. URL, file size hint)
+    status: str        # "done" | "pending" | "failed"
+    error: str = ""
+    created_at: datetime

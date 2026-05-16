@@ -99,22 +99,30 @@ async def upload_cvs(
     # can always trigger an explicit rebuild via
     # POST /api/cv/library/rebuild if they want.
     if saved:
+        # Unified-uploader contract: EVERY add (CV, Document, or
+        # WebSource) rebuilds the master library so the rest of the
+        # app (matching, agent, tailored CV) always sees the latest
+        # aggregate. Failure here is logged, not raised — a bad source
+        # mustn't block subsequent uploads.
         try:
             from datetime import datetime as _dt
             from app.models.db_models import CVLibrary  # local: avoid import cycle
             from app.services.cv_library_builder import build_library_from_all
 
-            existing = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
-            if existing is None:
-                payload = build_library_from_all(db).model_dump()
-                row = CVLibrary(id=1, **payload)
+            payload = build_library_from_all(db).model_dump()
+            row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+            if row is None:
+                row = CVLibrary(id=1)
                 db.add(row)
-                db.commit()
+            for k, v in payload.items():
+                setattr(row, k, v)
+            row.updated_at = _dt.utcnow()
+            db.commit()
         except Exception as exc:  # pragma: no cover
-            # Never let library auto-seed break an upload — log and move on.
+            db.rollback()
             import logging as _log
             _log.getLogger("ai_job_cv_matcher.cv").warning(
-                "CV library auto-seed failed: %s", exc,
+                "CV library auto-rebuild failed: %s", exc,
             )
 
     return [CVOut.model_validate(cv) for cv in saved]

@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 
 from app.models.db_models import CV as CVRow
 from app.models.db_models import Document as DocumentRow
+from app.models.db_models import WebSource as WebSourceRow
 from app.models.schemas import (
     CertificationEntry,
     CVHeader,
@@ -439,6 +440,12 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
     docs: list[DocumentRow] = (
         db.query(DocumentRow).order_by(DocumentRow.created_at.asc()).all()
     )
+    web_sources: list[WebSourceRow] = (
+        db.query(WebSourceRow)
+        .filter(WebSourceRow.status == "done")
+        .order_by(WebSourceRow.created_at.asc())
+        .all()
+    )
 
     # Pre-compute parsed structures + raw section blocks for every source
     # up-front so every downstream pass can read them without redoing the
@@ -484,6 +491,19 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
     # missed in a CV.
     for d in docs:
         for s in find_technical_skills(d.raw_text or ""):
+            key = s.lower()
+            if key not in seen_skill:
+                seen_skill.add(key)
+                all_skills.append(s)
+    # Web sources: pick up skills from extracted.skills and from
+    # raw_text scrape (catches portfolio "Skills: …" lists).
+    for w in web_sources:
+        for s in (w.extracted or {}).get("skills") or []:
+            key = (s or "").strip().lower()
+            if key and key not in seen_skill:
+                seen_skill.add(key)
+                all_skills.append(s.strip())
+        for s in find_technical_skills(w.raw_text or ""):
             key = s.lower()
             if key not in seen_skill:
                 seen_skill.add(key)
@@ -539,6 +559,28 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
         _add_proj(selected_acc,    _projects_from_block(blocks.get("selected_projects", "")))
         _add_proj(additional_acc,  _projects_from_block(blocks.get("additional_projects", "")))
         _add_proj(generic_acc,     _projects_from_block(blocks.get("projects", "")))
+
+    # Web sources: turn each LLM-extracted project entry into a
+    # ProjectEntry. GitHub user/repo extractions provide explicit
+    # title/summary/tags; generic portfolio scrapes match the same shape.
+    # All web-source projects land in "additional" since portfolio
+    # write-ups are usually short and not the candidate's flagship work
+    # (CVs already chose what to highlight).
+    for w in web_sources:
+        for p in (w.extracted or {}).get("projects") or []:
+            title = (p.get("title") or "").strip()
+            if not title:
+                continue
+            summary = (p.get("summary") or "").strip()
+            tags = [t for t in (p.get("tags") or []) if isinstance(t, str)]
+            highlights: list[str] = []
+            if summary:
+                highlights.append(summary)
+            if p.get("url"):
+                highlights.append(f"Source: {p['url']}")
+            _add_proj(additional_acc, [ProjectEntry(
+                title=title, period="", highlights=highlights, tags=tags[:8],
+            )])
 
     if selected_acc or additional_acc:
         # CV provided explicit split — respect it. Generic projects join
@@ -600,11 +642,17 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
                 seen_lang.add(head)
                 languages.append(lang)
 
-    # ----- Summary: pick the longest non-empty summary across CVs. -----
+    # ----- Summary: pick the longest non-empty summary across CVs.
+    # Web-source bio acts as a fallback when no CV provided one. -----
     summary = ""
     for cv in cvs:
         if cv.summary and len(cv.summary) > len(summary):
             summary = cv.summary.strip()
+    if not summary:
+        for w in web_sources:
+            bio = ((w.extracted or {}).get("bio") or "").strip()
+            if bio and len(bio) > len(summary):
+                summary = bio
 
     return CVLibraryBase(
         header=header,

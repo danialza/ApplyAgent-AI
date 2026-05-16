@@ -126,6 +126,42 @@ class CVLibrary(Base):
     )
 
 
+class WebSource(Base):
+    """External web artifact the user pointed us at (portfolio site,
+    GitHub profile, individual repo, blog post). Lives alongside CV /
+    Document rows as a first-class library source; the master builder
+    folds it in on every rebuild.
+
+    `kind` discriminates how the ingester populated `raw_text` and
+    `extracted` (JSON snapshot of derived projects/skills the builder
+    can fold in cheaply on subsequent rebuilds).
+    """
+    __tablename__ = "web_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    # "web"   = generic page (portfolio, blog) → trafilatura/bs4 + LLM extract
+    # "github_user" = github.com/<user> → list public repos via API
+    # "github_repo" = github.com/<user>/<repo> → README + metadata
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, default="web")
+    title: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # JSON: best-effort structured extract — list[ProjectEntry-ish dicts],
+    # bio paragraph, skill hints. Lets the master builder fold this
+    # source in without re-LLM-ing every rebuild.
+    extracted: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # "pending" while fetching/extracting, "done" on success,
+    # "failed" with `error` populated.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
 class Application(Base):
     """Application tracker row — career-ops style spreadsheet.
 

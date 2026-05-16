@@ -31,6 +31,30 @@ export type ApplicationUpdate = Partial<
   Omit<Application, "id" | "created_at" | "updated_at" | "jd_hash">
 >;
 
+// ---------- Unified sources ----------
+
+export interface UnifiedSource {
+  id: number;
+  kind: "cv" | "document" | "web" | "github_user" | "github_repo";
+  title: string;
+  detail: string;
+  status: "pending" | "done" | "failed";
+  error?: string;
+  created_at: string;
+}
+
+export interface WebSourceOut {
+  id: number;
+  url: string;
+  kind: string;
+  title: string;
+  status: string;
+  error: string;
+  has_extracted: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DuplicateCheck {
   matched: boolean;
   match_kind: string;   // "" | "url" | "jd_hash" | "company_role"

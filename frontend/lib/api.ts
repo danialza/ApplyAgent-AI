@@ -283,4 +283,34 @@ export function applicationCvPdfUrl(id: number): string {
   return `${API_BASE}/api/applications/${id}/cv.pdf`;
 }
 
+// ---------- Unified sources ----------
+
+import type { UnifiedSource, WebSourceOut } from "./types";
+
+export async function listAllSources(): Promise<UnifiedSource[]> {
+  const res = await fetch(`${API_BASE}/api/sources`, { cache: "no-store" });
+  return handle<UnifiedSource[]>(res);
+}
+
+export async function addUrlSource(url: string): Promise<WebSourceOut> {
+  const res = await fetch(`${API_BASE}/api/sources/url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  return handle<WebSourceOut>(res);
+}
+
+export async function refreshUrlSource(id: number): Promise<WebSourceOut> {
+  const res = await fetch(`${API_BASE}/api/sources/url/${id}/refresh`, { method: "POST" });
+  return handle<WebSourceOut>(res);
+}
+
+export async function deleteUrlSource(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/sources/url/${id}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) {
+    throw new ApiError(`Delete failed (HTTP ${res.status})`, res.status);
+  }
+}
+
 export { ApiError, API_BASE };

@@ -2,14 +2,13 @@
 
 import { useEffect, useState } from "react";
 import AgentDashboard from "@/components/AgentDashboard";
-import CVUpload from "@/components/CVUpload";
 import ErrorMessage from "@/components/ErrorMessage";
 import LoadingState from "@/components/LoadingState";
 import ManualJobInput from "@/components/ManualJobInput";
 import MatchResults from "@/components/MatchResults";
 import ApplicationsPanel from "@/components/ApplicationsPanel";
 import TailoredCVPanel from "@/components/TailoredCVPanel";
-import UploadedCVList from "@/components/UploadedCVList";
+import UnifiedSourcePanel from "@/components/UnifiedSourcePanel";
 import { listCVs, matchAll } from "@/lib/api";
 import type { CV, RankedMatchResponse } from "@/lib/types";
 
@@ -82,22 +81,21 @@ export default function HomePage() {
 
       <section className="card space-y-4">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">1. Upload CVs</h2>
+          <h2 className="text-lg font-semibold text-slate-900">1. Sources → Master CV</h2>
           <p className="text-sm text-slate-500">
-            PDF or DOCX. You can compare multiple candidates against a single role.
+            One place to feed everything: CV files, supplementary docs,
+            and portfolio / GitHub URLs. Every add auto-rebuilds the
+            master CV that every other section reads from.
           </p>
         </div>
-
-        <CVUpload onUploaded={handleUploaded} onError={setError} />
-
-        <div className="space-y-2">
-          <p className="section-title">Uploaded CVs</p>
-          {loadingCvs ? (
-            <LoadingState label="Loading CVs…" />
-          ) : (
-            <UploadedCVList cvs={cvs} onDelete={handleDeleted} onError={setError} />
-          )}
-        </div>
+        <UnifiedSourcePanel
+          onError={setError}
+          onSourcesChanged={() => {
+            // Refresh the legacy CV list (still used by sections 2/3/4
+            // until phase 3 rewires them to read directly from master).
+            listCVs().then(setCvs).catch(() => undefined);
+          }}
+        />
       </section>
 
       <section className="card space-y-4">

@@ -28,6 +28,7 @@ from app.api import (
     match_routes,
     profile_routes,
     search_routes,
+    source_routes,
     tailor_routes,
 )
 from app.db.database import init_db
@@ -75,3 +76,4 @@ app.include_router(agent_routes.router)
 app.include_router(generate_routes.router)
 app.include_router(cv_render_routes.router)
 app.include_router(application_routes.router)
+app.include_router(source_routes.router)
