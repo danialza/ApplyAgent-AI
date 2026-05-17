@@ -167,7 +167,10 @@ def _llm_categorise(skills: list[str]) -> list[SkillGroup] | None:
     # noisy catch-all.
     dropped = [s for s in skills if s.lower() not in surviving]
     if dropped:
-        backfill = _fallback_categorise(dropped)
+        # Strict mode: deterministic categoriser drops anything that
+        # would have landed in "Other" — when LLM is in the pipeline
+        # we trust strict groups over completeness.
+        backfill = _fallback_categorise(dropped, include_other=False)
         by_label = {g.label.lower(): g for g in out}
         kept, discarded = 0, 0
         for g in backfill:
@@ -306,17 +309,23 @@ def _fallback_label(skill: str) -> str:
     return "Other"
 
 
-def _fallback_categorise(skills: list[str]) -> list[SkillGroup]:
+def _fallback_categorise(skills: list[str], *, include_other: bool = True) -> list[SkillGroup]:
+    """Deterministic categoriser. `include_other=False` drops items
+    that hit the catch-all bucket (used when caller wants strict
+    grouping)."""
     buckets: OrderedDict[str, list[str]] = OrderedDict()
     for s in skills:
         label = _fallback_label(s)
         buckets.setdefault(label, []).append(s)
     out: list[SkillGroup] = []
-    # Canonical order first, then anything custom.
+    # Canonical order first, then anything custom. "Other" goes last
+    # if kept, gets dropped entirely if include_other=False.
     for canon in CANONICAL_GROUPS:
         if canon in buckets:
             out.append(SkillGroup(label=canon, items=buckets.pop(canon)))
     for label, items in buckets.items():
+        if label == "Other" and not include_other:
+            continue
         out.append(SkillGroup(label=label, items=items))
     return out
 
