@@ -380,7 +380,7 @@ _LATEX_TEMPLATE = r"""
 
 <% for p in all_projects %>
 \begin{onecolentry}
-\textbf{<< p.title | latex >>}<% if p.period %> \hfill << p.period | latex >><% endif %>
+<% if p.url %>\textbf{\href{<< p.url >>}{<< p.title | latex >>}}<% else %>\textbf{<< p.title | latex >>}<% endif %><% if p.period %> \hfill << p.period | latex >><% endif %>
 <% if p.highlights %>
 \begin{highlights}
 <% for h in p.highlights %>
@@ -446,8 +446,39 @@ _LATEX_TEMPLATE = r"""
 
 # ---------- Header line composition ----------
 
-def _header_line(header) -> str:
-    """Build the contact line under the name. Mixes plain text + hyperlinks."""
+def _slugify_company(s: str) -> str:
+    """Lower-case kebab-case for use in UTM campaign param. Returns
+    empty string when input is blank — caller skips UTM in that case."""
+    s = (s or "").strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    return s
+
+
+def _with_utm(url: str, campaign: str) -> str:
+    """Append career-ops UTM tracking to a URL.
+
+    Adds ?utm_source=cv&utm_medium=pdf&utm_campaign=<company-slug>
+    so the candidate can see in analytics which application drove the
+    click. No-op when:
+      * `campaign` is empty (master CV render with no JD),
+      * URL is mailto: or otherwise non-http,
+      * URL already has utm_source set.
+    """
+    if not url or not campaign:
+        return url
+    low = url.lower()
+    if low.startswith("mailto:") or "utm_source=" in low:
+        return url
+    if not low.startswith(("http://", "https://")):
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}utm_source=cv&utm_medium=pdf&utm_campaign={campaign}"
+
+
+def _header_line(header, *, utm_campaign: str = "") -> str:
+    """Build the contact line under the name. Adds UTM params to every
+    link when `utm_campaign` is set (i.e. tailored render with a known
+    company). mailto: stays plain."""
     parts: list[str] = []
     if header.location:
         parts.append(latex_escape(header.location))
@@ -455,17 +486,11 @@ def _header_line(header) -> str:
         parts.append(rf"\href{{mailto:{header.email}}}{{{latex_escape(header.email)}}}")
     if header.phone:
         parts.append(latex_escape(header.phone))
-    if header.website:
-        url = header.website
-        display = url.replace("https://", "").replace("http://", "")
-        parts.append(rf"\href{{{url}}}{{{latex_escape(display)}}}")
-    if header.linkedin:
-        url = header.linkedin
-        display = url.replace("https://", "").replace("http://", "")
-        parts.append(rf"\href{{{url}}}{{{latex_escape(display)}}}")
-    if header.github:
-        url = header.github
-        display = url.replace("https://", "").replace("http://", "")
+    for raw in (header.website, header.linkedin, header.github):
+        if not raw:
+            continue
+        url = _with_utm(raw, utm_campaign)
+        display = raw.replace("https://", "").replace("http://", "")
         parts.append(rf"\href{{{url}}}{{{latex_escape(display)}}}")
     return " \\quad | \\quad\n    ".join(parts)
 
@@ -494,6 +519,11 @@ def render_cv(
     core_competencies_override: list[str] | None = None,
 ) -> RenderResult:
     """Render a tailored CV. See module docstring for the pipeline."""
+    # UTM tracking — empty for master CV renders (no JD), populated
+    # for tailored renders so the candidate can attribute portfolio
+    # clicks to a specific application.
+    utm_campaign = _slugify_company(job.company if job else "")
+
     jd_terms = _jd_terms(job)
     jd_groups = {group_key(t) for t in jd_terms if t}
     bold_terms = _bold_terms(jd_terms)
@@ -628,9 +658,12 @@ def render_cv(
             # returns a project named "Project" with melted highlights.
             if not title or title.lower() in {"project", "untitled"}:
                 continue
+            raw_url = (getattr(p, "url", "") or "").strip()
+            project_url = _with_utm(raw_url, utm_campaign) if raw_url else ""
             out.append({
                 "title": title,
                 "period": p.period,
+                "url": project_url,
                 "highlights": [render_bullet(h) for h in (p.highlights or [])],
             })
         return out
@@ -730,7 +763,7 @@ def render_cv(
     template = _jinja_env.from_string(_LATEX_TEMPLATE)
     latex = template.render(
         header=library.header,
-        header_line=_header_line(library.header),
+        header_line=_header_line(library.header, utm_campaign=utm_campaign),
         summary=render_bullet(library.summary) if library.summary else "",
         core_competencies=core_competencies,
         skills_groups=skills_groups_payload,

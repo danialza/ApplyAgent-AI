@@ -428,6 +428,11 @@ class ProjectEntry(BaseModel):
     highlights: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
+    # Optional public URL (portfolio page, GitHub repo, demo). When
+    # set, the renderer wraps the title in \href and appends UTM
+    # tracking params derived from the JD's company so the candidate
+    # can see in analytics which application drove the click.
+    url: str = ""
 
 
 class ExperienceEntryLib(BaseModel):

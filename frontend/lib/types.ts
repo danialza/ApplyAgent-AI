@@ -330,6 +330,9 @@ export interface ProjectEntry {
   highlights: string[];
   tags: string[];
   sources?: string[];
+  /** Optional public URL — portfolio page, GitHub repo, demo.
+   *  Tailored renders auto-append UTM tracking when set. */
+  url?: string;
 }
 
 export interface ExperienceEntryLib {
