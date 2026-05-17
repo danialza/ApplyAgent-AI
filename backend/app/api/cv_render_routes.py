@@ -54,6 +54,7 @@ def _to_out(row: CVLibrary) -> CVLibraryOut:
         certifications=row.certifications or [],
         languages=row.languages or [],
         updated_at=row.updated_at or datetime.utcnow(),
+        manually_edited_at=getattr(row, "manually_edited_at", None),
     )
 
 
@@ -111,6 +112,126 @@ def library_issues(db: Session = Depends(get_db)) -> dict:
     library_out = _to_out(row)
     result = audit(library_out, use_llm=True)
     return result.model_dump()
+
+
+@router.post("/library/apply-fix", response_model=CVLibraryOut)
+def apply_fix(payload: dict, db: Session = Depends(get_db)) -> CVLibraryOut:
+    """Apply a structured `FixAction` from the library audit.
+
+    Body shape: ``{"kind": "drop_entry"|"split_education"|"set_field"|...,
+    "payload": {...}}``. Mutates the master library in place AND
+    locks it (sets manually_edited_at) so the fix isn't blown away
+    by the next source upload.
+
+    Supported kinds:
+      drop_entry        — payload: {section, index}
+      split_education   — payload: {section: "education", index,
+                                    new_institution, new_degree}
+      set_field         — payload: {section, index, field, value}
+      truncate_field    — payload: {section, index, field, max_chars}
+      set_summary       — payload: {value}
+      set_header_field  — payload: {field, value}
+    """
+    kind = (payload or {}).get("kind", "")
+    p = (payload or {}).get("payload", {}) or {}
+    row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No library.")
+
+    def _list_for(section: str):
+        mapping = {
+            "selected_projects": (row.selected_projects or []),
+            "additional_projects": (row.additional_projects or []),
+            "experience": (row.experience or []),
+            "education": (row.education or []),
+            "certifications": (row.certifications or []),
+            "publications": (row.publications or []),
+        }
+        return mapping.get(section)
+
+    def _save_list(section: str, new_list: list):
+        setattr(row, section, new_list)
+
+    if kind == "drop_entry":
+        section = p.get("section", "")
+        idx = int(p.get("index", -1))
+        lst = _list_for(section)
+        if lst is None or idx < 0 or idx >= len(lst):
+            raise HTTPException(status_code=400, detail=f"Bad drop_entry payload: {p}")
+        new_list = list(lst)
+        new_list.pop(idx)
+        _save_list(section, new_list)
+    elif kind == "split_education":
+        idx = int(p.get("index", -1))
+        edu = list(row.education or [])
+        if idx < 0 or idx >= len(edu):
+            raise HTTPException(status_code=400, detail=f"Bad split_education index: {idx}")
+        entry = dict(edu[idx]) if isinstance(edu[idx], dict) else edu[idx].copy() if hasattr(edu[idx], "copy") else {}
+        # Library JSON columns store dicts already.
+        if not isinstance(edu[idx], dict):
+            entry = edu[idx]
+        entry["institution"] = (p.get("new_institution") or "").strip()
+        entry["degree"] = (p.get("new_degree") or "").strip()
+        edu[idx] = entry
+        _save_list("education", edu)
+    elif kind == "set_field":
+        section = p.get("section", "")
+        idx = int(p.get("index", -1))
+        field = p.get("field", "")
+        value = p.get("value", "")
+        lst = _list_for(section)
+        if lst is None or idx < 0 or idx >= len(lst) or not field:
+            raise HTTPException(status_code=400, detail=f"Bad set_field payload: {p}")
+        new_list = list(lst)
+        target = dict(new_list[idx]) if not isinstance(new_list[idx], dict) else new_list[idx]
+        target[field] = value
+        new_list[idx] = target
+        _save_list(section, new_list)
+    elif kind == "truncate_field":
+        section = p.get("section", "")
+        idx = int(p.get("index", -1))
+        field = p.get("field", "")
+        max_chars = int(p.get("max_chars", 180))
+        lst = _list_for(section)
+        if lst is None or idx < 0 or idx >= len(lst) or not field:
+            raise HTTPException(status_code=400, detail=f"Bad truncate_field payload: {p}")
+        new_list = list(lst)
+        target = new_list[idx] if isinstance(new_list[idx], dict) else dict(new_list[idx])
+        cur = (target.get(field) or "")[:max_chars]
+        target[field] = cur
+        new_list[idx] = target
+        _save_list(section, new_list)
+    elif kind == "set_summary":
+        row.summary = (p.get("value") or "").strip()
+    elif kind == "set_header_field":
+        field = p.get("field", "")
+        value = p.get("value", "")
+        if not field:
+            raise HTTPException(status_code=400, detail="Missing field name.")
+        header = dict(row.header or {})
+        header[field] = value
+        row.header = header
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown fix kind: {kind!r}")
+
+    row.updated_at = datetime.utcnow()
+    row.manually_edited_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return _to_out(row)
+
+
+@router.post("/library/unlock", response_model=CVLibraryOut)
+def unlock_library(db: Session = Depends(get_db)) -> CVLibraryOut:
+    """Clear the manual-edit lock. Library content stays the same
+    but the next source upload / delete will auto-rebuild it again."""
+    row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No library to unlock.")
+    row.manually_edited_at = None
+    db.commit()
+    db.refresh(row)
+    return _to_out(row)
 
 
 @router.delete("/library", status_code=status.HTTP_204_NO_CONTENT)
@@ -242,23 +363,37 @@ async def upload_library_markdown(
 
 
 @router.post("/library/rebuild", response_model=CVLibraryOut)
-def rebuild_library_from_all(db: Session = Depends(get_db)) -> CVLibraryOut:
+def rebuild_library_from_all(
+    force: bool = False,
+    db: Session = Depends(get_db),
+) -> CVLibraryOut:
     """Aggregate every uploaded CV + Document into one merged library.
 
-    Replaces the singleton row. Header takes the newest CV's contact
-    info; skills / projects / experience / certifications / publications
-    / languages are unioned and deduplicated across all sources. Each
-    entry is auto-tagged with the canonical skills found in its text so
-    the renderer ranks by JD overlap without manual curation.
+    Respects the manual-edit lock: if `manually_edited_at` is set and
+    `force=false`, returns the library unchanged (the user's hand
+    edits stay intact). `force=true` ignores the lock AND clears it
+    so future auto-rebuilds work normally again.
     """
-    payload = build_library_from_all(db)
     row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is not None and getattr(row, "manually_edited_at", None) and not force:
+        # Locked — refuse to overwrite. UI knows from the lock badge.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Library is hand-locked (manually_edited_at = "
+                f"{row.manually_edited_at.isoformat()}). "
+                "POST /api/cv/library/rebuild?force=true to override."
+            ),
+        )
+    payload = build_library_from_all(db)
     if row is None:
         row = CVLibrary(id=1)
         db.add(row)
     for k, v in payload.model_dump().items():
         setattr(row, k, v)
     row.updated_at = datetime.utcnow()
+    if force:
+        row.manually_edited_at = None
     db.commit()
     db.refresh(row)
     return _to_out(row)
@@ -300,7 +435,12 @@ def upsert_library(
     payload: CVLibraryBase,
     db: Session = Depends(get_db),
 ) -> CVLibraryOut:
-    """Create or replace the singleton CV library."""
+    """Create or replace the singleton CV library.
+
+    Sets `manually_edited_at` so subsequent auto-rebuilds from
+    sources don't overwrite the user's hand edits. To unlock, POST
+    /api/cv/library/rebuild?force=true.
+    """
     data = payload.model_dump()
     row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
     if row is None:
@@ -309,6 +449,7 @@ def upsert_library(
     for k, v in data.items():
         setattr(row, k, v)
     row.updated_at = datetime.utcnow()
+    row.manually_edited_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
     return _to_out(row)

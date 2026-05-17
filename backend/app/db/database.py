@@ -59,6 +59,7 @@ def _add_missing_columns() -> None:
     # (table, column, ddl-type, default literal for ALTER)
     additions: list[tuple[str, str, str, str]] = [
         ("cv_library", "core_competencies", "JSON", "'[]'"),
+        ("cv_library", "manually_edited_at", "TIMESTAMP", "NULL"),
         ("applications", "cv_latex", "TEXT", "''"),
         ("applications", "cv_pdf_b64", "TEXT", "''"),
         ("applications", "cv_filename", "VARCHAR(255)", "''"),
@@ -73,10 +74,15 @@ def _add_missing_columns() -> None:
             }
             if column in existing:
                 continue
-            conn.execute(text(
-                f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type} "
-                f"DEFAULT {default}"
-            ))
+            # SQLite ALTER doesn't accept DEFAULT NULL syntax — emit
+            # column without DEFAULT when default is the literal 'NULL'.
+            if default.upper() == "NULL":
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
+            else:
+                conn.execute(text(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type} "
+                    f"DEFAULT {default}"
+                ))
 
 
 def get_db() -> Generator[Session, None, None]:

@@ -46,26 +46,10 @@ def _web_to_out(row: WebSource) -> WebSourceOut:
 
 
 def _rebuild_library_silent(db: Session) -> None:
-    """Trigger a master rebuild after every source mutation.
-
-    Failures here are logged + swallowed so a single bad source can't
-    block the user's next upload. The rebuild is also surfaced by the
-    library GET endpoint, so transient errors recover on next add.
-    """
-    try:
-        payload = build_library_from_all(db).model_dump()
-        from app.models.db_models import CVLibrary
-        row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
-        if row is None:
-            row = CVLibrary(id=1)
-            db.add(row)
-        for k, v in payload.items():
-            setattr(row, k, v)
-        row.updated_at = datetime.utcnow()
-        db.commit()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("master library rebuild failed: %s", exc)
-        db.rollback()
+    """Trigger a master rebuild after every source mutation. Skips
+    silently when library is hand-locked. Errors swallowed."""
+    from app.services.master_rebuild import try_rebuild_master
+    try_rebuild_master(db)
 
 
 # ---------- unified listing ----------

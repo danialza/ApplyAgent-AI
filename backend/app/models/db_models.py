@@ -125,6 +125,14 @@ class CVLibrary(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
+    # When set, the user hand-edited the library and auto-rebuilds
+    # are skipped to preserve their changes. POST /api/cv/library/rebuild?force=true
+    # overrides. Set automatically by PUT /api/cv/library and the
+    # apply-fix endpoint; cleared by force-rebuild.
+    manually_edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, default=None
+    )
+
 
 class WebSource(Base):
     """External web artifact the user pointed us at (portfolio site,

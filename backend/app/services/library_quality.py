@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -32,12 +32,31 @@ logger = logging.getLogger("ai_job_cv_matcher.library_quality")
 Severity = Literal["error", "warning", "info"]
 
 
+class FixAction(BaseModel):
+    """Machine-applicable patch the UI's `Apply` button posts to
+    /api/cv/library/apply-fix. The `kind` discriminates how the
+    backend mutates the library; payload fields depend on kind.
+
+    Supported kinds:
+      drop_entry        — {section: 'projects'|'experience'|'education'|
+                            'certifications'|'publications', index: int}
+      set_field         — {section: ..., index: int, field: str, value: str}
+      set_summary       — {value: str}
+      set_header_field  — {field: str, value: str}
+      truncate_field    — {section: ..., index: int, field: str, max_chars: int}
+    """
+    kind: str
+    payload: dict = Field(default_factory=dict)
+    preview: str = ""        # human-readable before→after summary for UI
+
+
 class Issue(BaseModel):
     severity: Severity
     scope: str            # e.g. "education[0]", "projects", "experience[1]"
     title: str            # one-liner shown in UI
     detail: str = ""      # longer explanation, surfaces in tooltip
-    fix_hint: str = ""    # suggested action
+    fix_hint: str = ""    # suggested action (free text)
+    fix_action: Optional["FixAction"] = None  # machine-applicable patch (optional)
 
 
 class IssuesResponse(BaseModel):
@@ -92,16 +111,33 @@ def _check_education(library: CVLibraryOut) -> list[Issue]:
                 title="Empty education row",
                 detail="Both institution and degree are blank.",
                 fix_hint="Remove this entry from the source or re-upload a clean cv.md.",
+                fix_action=FixAction(
+                    kind="drop_entry",
+                    payload={"section": "education", "index": i},
+                    preview=f"Delete education[{i}]",
+                ),
             ))
             continue
         if len(inst) > 80 and "," in inst:
+            # Split heuristically — institution before first comma, anything
+            # after starting with MSc/BSc/PhD becomes the degree.
+            parts = [p.strip() for p in inst.split(",")]
+            inst_re = re.compile(r"^(University|Institute|College|School)\b", re.IGNORECASE)
+            deg_re = re.compile(r"^(MSc|BSc|PhD|BA|MA|MEng|BEng|MBA)\b", re.IGNORECASE)
+            new_inst = next((p for p in parts if inst_re.match(p)), parts[1] if len(parts) > 1 else "")
+            new_deg = next((p for p in parts if deg_re.match(p)), parts[0])
             out.append(Issue(
                 severity="warning", scope=scope,
                 title=f"Overlong institution: {inst[:60]}…",
-                detail="Looks like the CV parser glued the whole education line "
-                       "into the institution field. Render will try to split, "
-                       "but a clean cv.md upload fixes it permanently.",
-                fix_hint="Upload cv.md via section 1 → Markdown CV.",
+                detail="Parser stuffed the whole row into institution. Click "
+                       "Apply to split into clean institution + degree fields.",
+                fix_hint="Apply auto-split, or upload cv.md.",
+                fix_action=FixAction(
+                    kind="split_education",
+                    payload={"section": "education", "index": i,
+                             "new_institution": new_inst, "new_degree": new_deg},
+                    preview=f"institution → {new_inst!r}; degree → {new_deg!r}",
+                ),
             ))
         if deg and (len(deg) > 180 or re.search(r"\.\s+[A-Z]", deg)):
             out.append(Issue(
@@ -133,13 +169,23 @@ def _check_projects(library: CVLibraryOut) -> list[Issue]:
     for i, p in enumerate(all_projects):
         scope = f"projects[{i}]"
         title = (p.title or "").strip()
+        # Index-into-master: selected first then additional.
+        n_sel = len(library.selected_projects or [])
+        if i < n_sel:
+            sec, real_idx = "selected_projects", i
+        else:
+            sec, real_idx = "additional_projects", i - n_sel
         if not title:
             out.append(Issue(
                 severity="error", scope=scope,
                 title="Project with no title",
-                detail="Renderer drops these silently. Likely an LLM-polish artifact "
-                       "or a portfolio scrape with no recognisable header.",
-                fix_hint="Delete the source row (section 1) or edit library JSON.",
+                detail="Renderer drops these silently. Likely an LLM-polish artifact.",
+                fix_hint="Click Apply to drop, or edit library JSON.",
+                fix_action=FixAction(
+                    kind="drop_entry",
+                    payload={"section": sec, "index": real_idx},
+                    preview=f"Delete {sec}[{real_idx}]",
+                ),
             ))
             continue
         if title.lower() in {"project", "untitled", "unknown"}:
@@ -147,7 +193,12 @@ def _check_projects(library: CVLibraryOut) -> list[Issue]:
                 severity="error", scope=scope,
                 title=f"Placeholder title: {title!r}",
                 detail="Looks like a corrupt entry.",
-                fix_hint="Delete the source or edit the library.",
+                fix_hint="Click Apply to drop.",
+                fix_action=FixAction(
+                    kind="drop_entry",
+                    payload={"section": sec, "index": real_idx},
+                    preview=f"Delete {sec}[{real_idx}]",
+                ),
             ))
         if not p.highlights:
             out.append(Issue(

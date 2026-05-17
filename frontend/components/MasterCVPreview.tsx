@@ -1,16 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchCVLibrary, fetchLibraryIssues } from "@/lib/api";
+import {
+  applyLibraryFix,
+  fetchCVLibrary,
+  fetchLibraryIssues,
+  rebuildLibraryForce,
+  unlockLibrary,
+  type LibraryIssue,
+} from "@/lib/api";
 import type { CVLibrary } from "@/lib/types";
-
-interface LibraryIssue {
-  severity: "error" | "warning" | "info";
-  scope: string;
-  title: string;
-  detail: string;
-  fix_hint: string;
-}
 
 interface Props {
   /** Bumped from the parent (UnifiedSourcePanel) whenever a source
@@ -120,11 +119,43 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
                   : "text-slate-600";
               return (
                 <li key={i} className="rounded border border-slate-200 bg-white/60 px-2 py-1">
-                  <p className={`font-semibold ${cls}`}>
-                    {dot} [{iss.scope}] {iss.title}
-                  </p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className={`font-semibold ${cls}`}>
+                      {dot} [{iss.scope}] {iss.title}
+                    </p>
+                    {iss.fix_action && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!confirm(
+                            `Apply this fix?\n\n${iss.fix_action!.preview}\n\nThis will lock the master CV (auto-rebuild paused until you unlock).`
+                          )) return;
+                          try {
+                            await applyLibraryFix({
+                              kind: iss.fix_action!.kind,
+                              payload: iss.fix_action!.payload,
+                            });
+                            // Bumping refreshKey is the parent's job;
+                            // simplest path: force a reload of audit + lib.
+                            window.location.reload();
+                          } catch (e) {
+                            alert(e instanceof Error ? e.message : "Apply failed");
+                          }
+                        }}
+                        className="shrink-0 rounded border border-slate-700 bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-slate-900"
+                        title={`Preview: ${iss.fix_action.preview}`}
+                      >
+                        Apply fix
+                      </button>
+                    )}
+                  </div>
                   {iss.detail && (
                     <p className="text-slate-600">{iss.detail}</p>
+                  )}
+                  {iss.fix_action?.preview && (
+                    <p className="text-[10px] text-emerald-700">
+                      ↻ {iss.fix_action.preview}
+                    </p>
                   )}
                   {iss.fix_hint && (
                     <p className="italic text-slate-500">↳ {iss.fix_hint}</p>
@@ -134,6 +165,50 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
             })}
           </ul>
         </details>
+      )}
+
+      {/* Lock badge — when set, auto-rebuilds from new sources are
+          paused so the user's hand edits / applied fixes stay intact. */}
+      {lib.manually_edited_at && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-violet-300 bg-violet-50 px-2 py-1.5 text-xs text-violet-900">
+          <p>
+            🔒 <strong>Hand-locked</strong> since{" "}
+            {lib.manually_edited_at.slice(0, 19).replace("T", " ")}.
+            New CV / URL uploads won&apos;t auto-rebuild until you unlock.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                if (!confirm("Unlock the master CV? Hand edits stay; future source uploads will auto-rebuild it.")) return;
+                try {
+                  await unlockLibrary();
+                  window.location.reload();
+                } catch (e) {
+                  alert(e instanceof Error ? e.message : "Unlock failed");
+                }
+              }}
+              className="rounded border border-violet-600 bg-violet-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-violet-700"
+            >
+              Unlock
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!confirm("Force-rebuild from all sources? This DISCARDS your hand edits.")) return;
+                try {
+                  await rebuildLibraryForce();
+                  window.location.reload();
+                } catch (e) {
+                  alert(e instanceof Error ? e.message : "Rebuild failed");
+                }
+              }}
+              className="rounded border border-rose-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-rose-700 hover:bg-rose-50"
+            >
+              Discard & rebuild
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Header */}

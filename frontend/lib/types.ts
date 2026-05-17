@@ -375,6 +375,7 @@ export interface CompetencyEntry {
 
 export interface CVLibrary {
   id: number;
+  manually_edited_at?: string | null;
   header: CVHeader;
   summary: string;
   skills_groups: SkillGroup[];

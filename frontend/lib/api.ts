@@ -287,12 +287,47 @@ export function applicationJdTxtUrl(id: number): string {
   return `${API_BASE}/api/applications/${id}/jd.txt`;
 }
 
+export interface LibraryIssue {
+  severity: "error" | "warning" | "info";
+  scope: string;
+  title: string;
+  detail: string;
+  fix_hint: string;
+  fix_action?: {
+    kind: string;
+    payload: Record<string, any>;
+    preview: string;
+  } | null;
+}
+
 export async function fetchLibraryIssues(): Promise<{
-  issues: { severity: "error" | "warning" | "info"; scope: string; title: string; detail: string; fix_hint: string }[];
+  issues: LibraryIssue[];
   counts: { error?: number; warning?: number; info?: number; total: number };
   llm_used: boolean;
 }> {
   const res = await fetch(`${API_BASE}/api/cv/library/issues`, { cache: "no-store" });
+  return handle(res);
+}
+
+export async function applyLibraryFix(action: {
+  kind: string;
+  payload: Record<string, any>;
+}): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/cv/library/apply-fix`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(action),
+  });
+  return handle(res);
+}
+
+export async function unlockLibrary(): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/cv/library/unlock`, { method: "POST" });
+  return handle(res);
+}
+
+export async function rebuildLibraryForce(): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/cv/library/rebuild?force=true`, { method: "POST" });
   return handle(res);
 }
 

@@ -492,6 +492,9 @@ class CVLibraryBase(BaseModel):
 class CVLibraryOut(CVLibraryBase):
     id: int = 1
     updated_at: datetime
+    # When set, library is hand-locked. Auto-rebuilds skip; UI shows
+    # a lock badge. force=true on /library/rebuild clears it.
+    manually_edited_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
