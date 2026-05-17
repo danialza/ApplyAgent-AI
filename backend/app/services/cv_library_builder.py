@@ -424,6 +424,34 @@ def _website_url(portfolio: str) -> str:
 
 # ---------- Public ----------
 
+def _promote_project_urls(entries: list[ProjectEntry]) -> None:
+    """For each project that has no `url` set, scan its highlights for
+    the first http(s) link and lift it into the field. Strips any
+    "Source: <url>" leading bullet the web ingester used to add."""
+    url_re = re.compile(r"https?://[^\s)]+")
+    for p in entries or []:
+        if (p.url or "").strip():
+            continue
+        new_highlights: list[str] = []
+        chosen: str = ""
+        for b in (p.highlights or []):
+            text = b or ""
+            stripped = text.strip()
+            if not chosen and stripped.lower().startswith("source:"):
+                m = url_re.search(stripped)
+                if m:
+                    chosen = m.group(0).rstrip(".,;)")
+                    continue  # drop the bullet entirely
+            if not chosen:
+                m = url_re.search(text)
+                if m:
+                    chosen = m.group(0).rstrip(".,;)")
+            new_highlights.append(text)
+        if chosen:
+            p.url = chosen
+            p.highlights = new_highlights
+
+
 # ---------- Merge helpers (smart dedup across sources) ----------
 #
 # When the same entry shows up in multiple sources (e.g. a project on
@@ -683,11 +711,21 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
             highlights: list[str] = []
             if summary:
                 highlights.append(summary)
-            if p.get("url"):
-                highlights.append(f"Source: {p['url']}")
+            # Promote URL to the dedicated field so the renderer can wrap
+            # the project title in \href + UTM. Avoids the noisy
+            # "Source: https://…" bullet duplicating the link.
+            project_url = (p.get("url") or "").strip()
             _add_proj(additional_acc, [ProjectEntry(
                 title=title, period="", highlights=highlights, tags=tags[:8],
+                url=project_url,
             )], sk)
+
+    # Post-merge sweep: for every project without a url, lift the first
+    # http(s) link out of highlights into the dedicated url field.
+    # Drops the leading "Source: " bullet that web ingest used to add.
+    _promote_project_urls(selected_acc)
+    _promote_project_urls(additional_acc)
+    _promote_project_urls(generic_acc)
 
     if selected_acc or additional_acc:
         # CV provided explicit split — respect it. Generic projects join

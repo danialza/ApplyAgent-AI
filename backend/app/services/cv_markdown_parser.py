@@ -162,10 +162,12 @@ def parse_cv_markdown(text: str) -> CVLibraryBase:
         elif section == "selected_projects":
             selected.append(ProjectEntry(
                 title=title, period=period, highlights=bullets, tags=tags,
+                url=(current_entry.get("url") or "").strip(),
             ))
         elif section == "additional_projects":
             additional.append(ProjectEntry(
                 title=title, period=period, highlights=bullets, tags=tags,
+                url=(current_entry.get("url") or "").strip(),
             ))
         elif section == "experience":
             t, comp = _split_title(title)
@@ -205,7 +207,7 @@ def parse_cv_markdown(text: str) -> CVLibraryBase:
             _flush_entry()
             head = line[4:].strip()
             title, period = _split_period(head)
-            current_entry = {"title": title, "period": period, "tags": [], "bullets": []}
+            current_entry = {"title": title, "period": period, "tags": [], "bullets": [], "url": ""}
             continue
 
         # Inside an entry: tags + bullets.
@@ -213,6 +215,15 @@ def parse_cv_markdown(text: str) -> CVLibraryBase:
             tags_match = re.match(r"\s*\*\*Tags?\*\*\s*:\s*(.+)$", line, re.IGNORECASE)
             if tags_match:
                 current_entry["tags"] = _split_csv(tags_match.group(1))
+                continue
+            # **URL**: https://...  — populates ProjectEntry.url so the
+            # renderer wraps the title in \href + UTM.
+            url_match = re.match(
+                r"\s*\*\*URL\*\*\s*:\s*(https?://\S+)\s*$",
+                line, re.IGNORECASE,
+            )
+            if url_match:
+                current_entry["url"] = url_match.group(1).rstrip(".,;)")
                 continue
             if line.startswith("- "):
                 current_entry["bullets"].append(_strip_bold(line[2:].strip()))
