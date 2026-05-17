@@ -50,9 +50,12 @@ _PRESETS: dict[str, SectionPlan] = {
         rationale="One-page preset (junior / early-career).",
     ),
     "two_page": SectionPlan(
-        max_selected_projects=5,
-        max_additional_projects=3,
-        max_experience=4,
+        # Tightened from 5/3/4 → 4/2/3 so only top-tier work survives.
+        # The renderer now drops zero-score projects too, so caps act
+        # as an upper bound rather than a fill quota.
+        max_selected_projects=4,
+        max_additional_projects=2,
+        max_experience=3,
         source="two_page",
         rationale="Two-page preset (senior / mid).",
     ),

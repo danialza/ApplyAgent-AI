@@ -187,11 +187,18 @@ def _rank_entries(
     items: list[Any],
     jd_terms: list[str],
     extract_terms: callable,
+    *,
+    drop_zero: bool = False,
 ) -> list[Any]:
     """Stable sort: highest JD overlap first, ties keep original order.
 
     `extract_terms(item)` returns the strings to score against (tags +
     any prose bullets we want to consider).
+
+    `drop_zero=True` removes entries that score 0 against the JD —
+    used for projects so an unrelated robotics project doesn't fill a
+    cap slot on a legal-AI CV. Falls through to "no drop" when the JD
+    is empty (master CV render).
     """
     if not items:
         return []
@@ -199,10 +206,20 @@ def _rank_entries(
         return list(items)
     jd_groups = {group_key(t) for t in jd_terms if t}
     decorated = [
-        (-_entry_score(extract_terms(item), jd_groups), idx, item)
+        (_entry_score(extract_terms(item), jd_groups), idx, item)
         for idx, item in enumerate(items)
     ]
-    decorated.sort()
+    if drop_zero:
+        positive = [(s, i, x) for s, i, x in decorated if s > 0]
+        # But never return an empty list — recruiters reading a CV with
+        # zero projects is worse than recruiters reading off-target ones.
+        # Keep the highest-scoring (or first) entry when all score 0.
+        if positive:
+            decorated = positive
+        else:
+            decorated = decorated[:1]
+    # Sort: highest score first (negate), then original order.
+    decorated.sort(key=lambda d: (-d[0], d[1]))
     return [item for _, _, item in decorated]
 
 
@@ -465,16 +482,22 @@ def render_cv(
     bold_terms = _bold_terms(jd_terms)
 
     # ---- Rank and cap each section.
+    # Projects: drop entries that score 0 against the JD so an
+    # unrelated robotics project doesn't fill a cap slot on a legal-AI
+    # CV. Experience stays full because employment history shouldn't
+    # have gaps (recruiters notice).
     selected = _rank_entries(
         list(library.selected_projects),
         jd_terms,
         lambda p: list(p.tags or []) + list(p.highlights or []),
+        drop_zero=True,
     )[:max_selected_projects] if max_selected_projects else []
 
     additional = _rank_entries(
         list(library.additional_projects),
         jd_terms,
         lambda p: list(p.tags or []) + list(p.highlights or []),
+        drop_zero=True,
     )[:max_additional_projects] if max_additional_projects else []
 
     experience = _rank_entries(
