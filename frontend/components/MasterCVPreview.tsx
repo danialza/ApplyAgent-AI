@@ -5,6 +5,7 @@ import {
   applyLibraryFix,
   fetchCVLibrary,
   fetchLibraryIssues,
+  putCVLibrary,
   rebuildLibraryForce,
   unlockLibrary,
   type LibraryIssue,
@@ -34,6 +35,36 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
   const [error, setError] = useState<string | null>(null);
   const [issues, setIssues] = useState<LibraryIssue[]>([]);
   const [issuesLLM, setIssuesLLM] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorJson, setEditorJson] = useState("");
+  const [editorSaving, setEditorSaving] = useState(false);
+
+  function openEditor() {
+    if (!lib) return;
+    const { id: _id, updated_at: _u, manually_edited_at: _m, ...payload } = lib;
+    setEditorJson(JSON.stringify(payload, null, 2));
+    setEditorOpen(true);
+  }
+
+  async function saveEditor() {
+    setEditorSaving(true);
+    try {
+      const parsed = JSON.parse(editorJson);
+      await putCVLibrary(parsed);
+      setEditorOpen(false);
+      window.location.reload();
+    } catch (e) {
+      alert(
+        e instanceof SyntaxError
+          ? `Invalid JSON: ${e.message}`
+          : e instanceof Error
+          ? e.message
+          : "Save failed"
+      );
+    } finally {
+      setEditorSaving(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -223,12 +254,54 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
               .join(" · ") || "—"}
           </p>
         </div>
-        <div className="flex gap-2 text-[11px] text-slate-500">
+        <div className="flex items-center gap-2 text-[11px] text-slate-500">
           {lib.header.linkedin && <a href={lib.header.linkedin} target="_blank" rel="noreferrer" className="underline">LinkedIn</a>}
           {lib.header.github && <a href={lib.header.github} target="_blank" rel="noreferrer" className="underline">GitHub</a>}
           {lib.header.website && <a href={lib.header.website} target="_blank" rel="noreferrer" className="underline">Site</a>}
+          <button
+            type="button"
+            onClick={openEditor}
+            className="ml-1 rounded border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+            title="Edit master library JSON. Saves with a lock so source uploads won't overwrite."
+          >
+            Edit library
+          </button>
         </div>
       </div>
+
+      {/* Inline editor — full library JSON. Saves lock the master. */}
+      {editorOpen && (
+        <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+          <p>
+            Edit JSON below. Save will <strong>lock</strong> the master
+            (auto-rebuild from sources paused until you Unlock). Schema
+            mirrors <code>CVLibraryBase</code>.
+          </p>
+          <textarea
+            value={editorJson}
+            onChange={(e) => setEditorJson(e.target.value)}
+            rows={16}
+            className="block w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 font-mono text-[11px] text-slate-900 focus:border-amber-500 focus:outline-none"
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setEditorOpen(false)}
+              className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={saveEditor}
+              disabled={editorSaving}
+              className="rounded bg-slate-900 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+            >
+              {editorSaving ? "Saving…" : "Save & lock"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Counters strip */}
       <div className="flex flex-wrap gap-1.5 text-[11px]">
