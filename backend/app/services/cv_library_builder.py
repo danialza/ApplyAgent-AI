@@ -769,7 +769,7 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
             if bio and len(bio) > len(summary):
                 summary = bio
 
-    return CVLibraryBase(
+    base = CVLibraryBase(
         header=header,
         summary=summary,
         skills_groups=skills_groups,
@@ -781,6 +781,19 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
         certifications=certifications,
         languages=languages,
     )
+    # LLM-driven curation: collapse near-duplicate project titles
+    # across sources (e.g. CV "TalkingHeadAI" + GitHub repo
+    # "talkinghead-ai"), drop pure-noise GitHub repos (profile-readme,
+    # forks, event archives). No-op when LLM disabled.
+    try:
+        from app.services.master_curator import curate_projects
+        return curate_projects(base)
+    except Exception as exc:  # pragma: no cover
+        import logging as _log
+        _log.getLogger("ai_job_cv_matcher.builder").warning(
+            "Master curator failed (returning uncurated library): %s", exc,
+        )
+        return base
 
 
 def build_library_from_cv(cv: CVRow, *, location: str = "") -> CVLibraryBase:
