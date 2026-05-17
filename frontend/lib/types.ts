@@ -21,7 +21,7 @@ export interface Application {
 
 export type ApplicationCreate = Omit<
   Application,
-  "id" | "created_at" | "updated_at" | "jd_hash" | "has_cv_latex" | "has_cv_pdf"
+  "id" | "created_at" | "updated_at" | "jd_hash" | "has_cv_latex" | "has_cv_pdf" | "has_jd"
 > & {
   jd_text?: string;
   cv_latex?: string;
