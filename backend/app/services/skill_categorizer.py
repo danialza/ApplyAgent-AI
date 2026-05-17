@@ -331,15 +331,26 @@ def _fallback_categorise(skills: list[str], *, include_other: bool = True) -> li
 
 
 def _dedup(skills: list[str]) -> list[str]:
-    seen: set[str] = set()
+    """Two-pass dedup: case-insensitive first (drops "Python" vs
+    "python"), then whitespace/punctuation-insensitive (drops
+    "ROS 2" vs "ROS2", "C++" vs "C ++").
+    Keeps the first occurrence's spelling."""
+    import re as _re
+    seen_low: set[str] = set()
+    seen_norm: set[str] = set()
     out: list[str] = []
     for s in skills or []:
         clean = (s or "").strip()
         if not clean:
             continue
         low = clean.lower()
-        if low in seen:
+        if low in seen_low:
             continue
-        seen.add(low)
+        norm = _re.sub(r"[\s\-_./]+", "", low)
+        if norm and norm in seen_norm:
+            continue
+        seen_low.add(low)
+        if norm:
+            seen_norm.add(norm)
         out.append(clean)
     return out
