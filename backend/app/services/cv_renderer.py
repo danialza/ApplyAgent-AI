@@ -480,6 +480,21 @@ def render_cv(
     jd_terms = _jd_terms(job)
     jd_groups = {group_key(t) for t in jd_terms if t}
     bold_terms = _bold_terms(jd_terms)
+    # Also bold every tech token from the candidate's own
+    # skills_groups so tools like FastAPI / MuJoCo / PyTorch act as
+    # scan-anchors regardless of whether the JD literally mentions
+    # them. `_bold_matches` filters terms with len < 3, so single-
+    # letter languages (C, R, Go) won't accidentally bold inside
+    # English prose.
+    cv_skill_tokens: list[str] = []
+    for g in (library.skills_groups or []):
+        cv_skill_tokens.extend(g.items or [])
+    if cv_skill_tokens:
+        bold_terms = sorted(
+            set(bold_terms) | set(cv_skill_tokens),
+            key=len,
+            reverse=True,
+        )
 
     # ---- Rank and cap each section.
     # Projects: drop entries that score 0 against the JD so an
