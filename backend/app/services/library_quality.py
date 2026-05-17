@@ -300,12 +300,19 @@ def _check_skills(library: CVLibraryOut) -> list[Issue]:
 
 # ---------- LLM check ----------
 
+class _LLMFixAction(BaseModel):
+    kind: str
+    payload: dict = Field(default_factory=dict)
+    preview: str = ""
+
+
 class _LLMIssue(BaseModel):
     severity: Severity = "warning"
     scope: str = ""
     title: str
     detail: str = ""
     fix_hint: str = ""
+    fix_action: Optional[_LLMFixAction] = None
 
 
 class _LLMOutput(BaseModel):
@@ -323,23 +330,41 @@ def _llm_audit(library: CVLibraryOut) -> list[Issue] | None:
         "You audit a candidate's master CV library for issues a "
         "recruiter would notice. Return a JSON object:\n"
         '  {"issues": [{"severity": "error|warning|info", '
-        '"scope": "education[0] | projects | experience[2] | summary | header", '
+        '"scope": "education[0] | selected_projects[1] | additional_projects[2] '
+        '| experience[2] | certifications[0] | publications[0] | summary | header", '
         '"title": "<short one-liner>", "detail": "<longer explanation>", '
-        '"fix_hint": "<one short action>"}, ...]}\n\n'
+        '"fix_hint": "<one short action>", "fix_action": null | '
+        '{"kind": "...", "payload": {...}, "preview": "..."}}, ...]}\n\n'
         "What to flag (limit total to 8 highest-impact issues):\n"
         "1. Same role/company spanning conflicting dates.\n"
         "2. Same project described differently in two entries.\n"
-        "3. Education that contradicts itself across rows (e.g. two "
-        "different GPAs for the same MSc).\n"
-        "4. Summary claims a skill (e.g. 'distributed systems') no "
-        "project or experience entry backs.\n"
+        "3. Education that contradicts itself across rows.\n"
+        "4. Summary claims a skill no project/experience backs.\n"
         "5. Date gaps > 12 months between experience entries.\n"
-        "6. Entries that look like parse garbage (overlong fields, "
-        "run-together words, sentences in title slots).\n"
+        "6. Parse garbage (overlong fields, run-together words).\n"
         "7. Duplicate-looking entries with slightly different titles.\n"
-        "Don't flag stylistic preferences. Don't invent problems "
-        "that aren't visible in the JSON. Return empty issues array "
-        "when the library looks clean."
+        "8. Periods in the future (e.g. project dated 2026 in past tense).\n\n"
+        "fix_action — INCLUDE one whenever the fix is mechanical. "
+        "Supported kinds + payloads:\n"
+        '  drop_entry        → {section, index}\n'
+        '  set_field         → {section, index, field, value} — for fixing periods, titles, bullets\n'
+        '  truncate_field    → {section, index, field, max_chars}\n'
+        '  set_summary       → {value} — for rewriting the summary\n'
+        '  set_header_field  → {field, value}\n'
+        "Section must be one of: selected_projects, additional_projects, "
+        "experience, education, certifications, publications. Indices are the "
+        "scope's index. preview is a one-line human description of the change.\n"
+        "Examples:\n"
+        '  Issue: project period is 2026 (future).\n'
+        '  → fix_action: {"kind": "set_field", "payload": {"section": '
+        '"selected_projects", "index": 1, "field": "period", "value": '
+        '"2024 – 2025"}, "preview": "period: 2026 → 2024 – 2025"}\n\n'
+        '  Issue: summary text truncated mid-word.\n'
+        '  → fix_action: {"kind": "set_summary", "payload": {"value": '
+        '"<full cleaned summary>"}, "preview": "rewrite summary, 4 lines"}\n\n'
+        "Omit fix_action only when the fix needs human judgment "
+        "(e.g. timeline conflict you can't auto-resolve). Don't invent "
+        "problems. Empty issues array when library looks clean."
     )
 
     # Compact view — drop bulk text fields the audit doesn't need.
@@ -386,10 +411,17 @@ def _llm_audit(library: CVLibraryOut) -> list[Issue] | None:
         logger.warning("Library LLM audit failed: %s", exc)
         return None
 
-    return [
-        Issue(
+    out: list[Issue] = []
+    for ll in parsed.issues[:8]:
+        action = None
+        if ll.fix_action and ll.fix_action.kind:
+            action = FixAction(
+                kind=ll.fix_action.kind,
+                payload=ll.fix_action.payload or {},
+                preview=ll.fix_action.preview or "",
+            )
+        out.append(Issue(
             severity=ll.severity, scope=ll.scope, title=ll.title,
-            detail=ll.detail, fix_hint=ll.fix_hint,
-        )
-        for ll in parsed.issues[:8]
-    ]
+            detail=ll.detail, fix_hint=ll.fix_hint, fix_action=action,
+        ))
+    return out
