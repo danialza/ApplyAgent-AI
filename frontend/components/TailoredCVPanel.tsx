@@ -27,8 +27,7 @@ interface Props {
 }
 
 const SECTION_LABELS: Record<string, string> = {
-  selected_projects: "Selected projects",
-  additional_projects: "Additional projects",
+  projects: "Projects",
   experience: "Experience",
   publications: "Publications",
   certifications: "Certifications",
@@ -835,8 +834,10 @@ function LibrarySummary({
         <span className="text-slate-500"> · {library.header.location}</span>
       </div>
       <div className="flex flex-wrap gap-3 text-xs text-slate-600">
-        <Stat label="Selected projects" value={library.selected_projects.length} />
-        <Stat label="Additional" value={library.additional_projects.length} />
+        <Stat
+          label="Projects"
+          value={library.selected_projects.length + library.additional_projects.length}
+        />
         <Stat label="Experience" value={library.experience.length} />
         <Stat label="Publications" value={library.publications.length} />
         <Stat label="Certifications" value={library.certifications.length} />

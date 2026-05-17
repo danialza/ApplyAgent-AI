@@ -14,8 +14,7 @@ interface Props {
 }
 
 const SECTION_LABELS: Record<string, string> = {
-  selected_projects: "Selected projects",
-  additional_projects: "Additional projects",
+  projects: "Projects",
   experience: "Experience",
   publications: "Publications",
   certifications: "Certifications",
@@ -89,8 +88,10 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
 
       {/* Counters strip */}
       <div className="flex flex-wrap gap-1.5 text-[11px]">
-        <CounterChip label="Selected" n={lib.selected_projects.length} />
-        <CounterChip label="Additional" n={lib.additional_projects.length} />
+        <CounterChip
+          label="Projects"
+          n={lib.selected_projects.length + lib.additional_projects.length}
+        />
         <CounterChip label="Experience" n={lib.experience.length} />
         <CounterChip label="Publications" n={lib.publications.length} />
         <CounterChip label="Certs" n={lib.certifications.length} />
@@ -128,8 +129,8 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
 
       {/* Entry sections — collapsible with per-entry source chips */}
       <EntryList
-        title={SECTION_LABELS.selected_projects}
-        entries={lib.selected_projects.map((p) => ({
+        title={SECTION_LABELS.projects}
+        entries={[...lib.selected_projects, ...lib.additional_projects].map((p) => ({
           line: p.title,
           period: p.period,
           tags: p.tags,
@@ -137,16 +138,6 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
         }))}
         sourceLabels={sourceLabels}
         openByDefault
-      />
-      <EntryList
-        title={SECTION_LABELS.additional_projects}
-        entries={lib.additional_projects.map((p) => ({
-          line: p.title,
-          period: p.period,
-          tags: p.tags,
-          sources: p.sources || [],
-        }))}
-        sourceLabels={sourceLabels}
       />
       <EntryList
         title={SECTION_LABELS.experience}

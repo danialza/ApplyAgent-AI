@@ -155,8 +155,8 @@ def test_render_unfiltered_master_cv() -> None:
     assert r"\section{Professional Summary" in tex
     assert r"\section{Technical Skills" in tex
     assert r"\section{Education" in tex
-    assert r"\section{Selected AI Projects" in tex
-    assert r"\section{Additional Technical Projects" in tex
+    # Selected + additional merged into one "Projects" section.
+    assert r"\section{Projects" in tex
     assert r"\section{Professional Experience" in tex
     assert r"\section{Certifications" in tex
     assert r"\section{Publications" in tex
@@ -188,7 +188,7 @@ def test_render_with_jd_ranks_and_bolds() -> None:
     assert r"\textbf{RAG}" in result.latex
 
     # `sections_chosen` reports the picks.
-    assert result.sections_chosen["selected_projects"] == ["AI Job-CV Matching Agent"]
+    assert result.sections_chosen["projects"][0] == "AI Job-CV Matching Agent"
     assert "Python" in result.matched_skills
 
 

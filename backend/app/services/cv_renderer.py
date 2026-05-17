@@ -341,27 +341,10 @@ _LATEX_TEMPLATE = r"""
 
 <% endfor %>
 <% endif %>
-<% if selected_projects %>
-\section{Selected Projects \hrulefill}
+<% if all_projects %>
+\section{Projects \hrulefill}
 
-<% for p in selected_projects %>
-\begin{onecolentry}
-\textbf{<< p.title | latex >>}<% if p.period %> \hfill << p.period | latex >><% endif %>
-<% if p.highlights %>
-\begin{highlights}
-<% for h in p.highlights %>
-    \item << h >>
-<% endfor %>
-\end{highlights}
-<% endif %>
-\end{onecolentry}
-
-<% endfor %>
-<% endif %>
-<% if additional_projects %>
-\section{Additional Projects \hrulefill}
-
-<% for p in additional_projects %>
+<% for p in all_projects %>
 \begin{onecolentry}
 \textbf{<< p.title | latex >>}<% if p.period %> \hfill << p.period | latex >><% endif %>
 <% if p.highlights %>
@@ -654,8 +637,10 @@ def render_cv(
         core_competencies=core_competencies,
         skills_groups=skills_groups_payload,
         education=render_education(library.education),
-        selected_projects=render_projects(selected),
-        additional_projects=render_projects(additional),
+        # Selected + additional are merged into one Projects section
+        # (user preference). Selected ranked first so the strongest
+        # work surfaces at the top of the new combined block.
+        all_projects=render_projects(selected + additional),
         experience=render_experience(experience),
         certifications=render_certifications(certifications),
         publications=render_publications(publications),
@@ -664,8 +649,8 @@ def render_cv(
     )
 
     sections_chosen = {
-        "selected_projects": [p.title for p in selected],
-        "additional_projects": [p.title for p in additional],
+        # Single merged "projects" list — selected ranked first.
+        "projects": [p.title for p in (selected + additional)],
         "experience": [x.title for x in experience],
         "publications": [p.title for p in publications],
         "certifications": [c.name for c in certifications],

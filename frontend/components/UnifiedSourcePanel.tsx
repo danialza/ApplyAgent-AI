@@ -299,8 +299,8 @@ export default function UnifiedSourcePanel({ onError, onSourcesChanged }: Props)
                     const b = breakdown[sk];
                     if (!b) return null;
                     const parts: string[] = [];
-                    if (b.selected_projects) parts.push(`${b.selected_projects} selected`);
-                    if (b.additional_projects) parts.push(`${b.additional_projects} additional`);
+                    const projTotal = (b.selected_projects || 0) + (b.additional_projects || 0);
+                    if (projTotal) parts.push(`${projTotal} projects`);
                     if (b.experience) parts.push(`${b.experience} exp`);
                     if (b.publications) parts.push(`${b.publications} pubs`);
                     if (b.certifications) parts.push(`${b.certifications} certs`);

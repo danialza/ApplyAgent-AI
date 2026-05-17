@@ -598,7 +598,8 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
             if key not in seen_skill:
                 seen_skill.add(key)
                 all_skills.append(s)
-    skills_groups = _group_skills(all_skills)
+    from app.services.skill_categorizer import categorise as categorise_skills
+    skills_groups = categorise_skills(all_skills)
 
     # ----- Education: merge across sources by institution+degree. -----
     # When several sources mention the same school, we UNION their
