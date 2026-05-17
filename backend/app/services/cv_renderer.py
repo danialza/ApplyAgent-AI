@@ -297,8 +297,11 @@ _LATEX_TEMPLATE = r"""
 \pagenumbering{gobble}
 \raggedright
 
-\titleformat{\section}{\needspace{4\baselineskip}\bfseries\large}{}{0pt}{}
-\titlespacing{\section}{-1pt}{0.18cm}{0.10cm}
+% Section titles: \Large + \bfseries for stronger visual hierarchy.
+% Top margin trimmed from 0.18cm → 0.06cm so the first section sits
+% close to the contact line.
+\titleformat{\section}{\needspace{4\baselineskip}\bfseries\Large}{}{0pt}{}
+\titlespacing{\section}{-1pt}{0.06cm}{0.08cm}
 \renewcommand\labelitemi{$\vcenter{\hbox{\small$\bullet$}}$}
 
 \newenvironment{highlights}{
@@ -329,7 +332,7 @@ _LATEX_TEMPLATE = r"""
     << header_line >>
 \end{center}
 
-\vspace{0.08cm}
+\vspace{-0.05cm}
 
 <% if summary %>
 \section{Professional Summary \hrulefill}
