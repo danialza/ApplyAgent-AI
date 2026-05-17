@@ -74,27 +74,41 @@ def _bold_matches(text: str, terms: list[str]) -> str:
     boundaries on both sides — prevents `ts` from matching inside
     `consultants`, `ml` from matching inside `family`, etc. Tokens with
     `+` or `#` (e.g. `C++`) get the same boundary treatment.
+
+    Nesting protection: after each term wraps, the wrapped region is
+    swapped for a placeholder so subsequent (shorter) terms never
+    match INSIDE an already-bolded region. Placeholders unwrap at the
+    end. Without this, `\\textbf{Deep \\textbf{Reinforcement Learning}}`
+    appears when both "Deep Reinforcement Learning" and "Reinforcement
+    Learning" are bold terms.
     """
     if not terms or not text:
         return text
-    # Filter out ultra-short aliases — too noisy regardless of boundary.
     sorted_terms = sorted({t for t in terms if t and len(t) >= 3}, key=len, reverse=True)
+    placeholders: list[str] = []
+
+    def _stash(wrapped: str) -> str:
+        placeholders.append(wrapped)
+        return f"\x00BOLD{len(placeholders) - 1}\x00"
+
     for term in sorted_terms:
         escaped_term = latex_escape(term)
         if not escaped_term:
             continue
-        # Right boundary blocks alphanumerics; left lookbehind blocks
-        # both alphanumerics AND the inside of an existing \textbf{…}.
         pattern = re.compile(
-            r"(?<!\\textbf\{)(?<![A-Za-z0-9_])"
+            r"(?<![A-Za-z0-9_])"
             + re.escape(escaped_term)
             + r"(?![A-Za-z0-9_])",
             re.IGNORECASE,
         )
-        text = pattern.sub(
-            lambda m: r"\textbf{" + m.group(0) + r"}",
-            text,
-        )
+        # Match the literal substring only when it's NOT inside an
+        # existing placeholder (placeholders are \x00BOLD<n>\x00 —
+        # no alnum match risk).
+        text = pattern.sub(lambda m: _stash(r"\textbf{" + m.group(0) + r"}"), text)
+    # Unwrap placeholders in reverse-insertion order so nested-stash
+    # references resolve.
+    for i, wrapped in enumerate(placeholders):
+        text = text.replace(f"\x00BOLD{i}\x00", wrapped)
     return text
 
 
@@ -553,16 +567,31 @@ def render_cv(
         return _bold_metrics(escaped)
 
     def render_skill_items(items: list[str]) -> str:
-        # Skills line: bold matched ones; leave separators plain.
-        rendered = [render_bullet(s) for s in items]
-        return ", ".join(rendered)
+        # Skills line: keep items plain. The group label is already
+        # bold via the template; bolding the items too produces a wall
+        # of bold (and the nested-bold artifact "Deep Reinforcement
+        # Learning" → "\textbf{Deep \textbf{...}}"). Bullets in
+        # projects / experience still get the bolder.
+        return ", ".join(latex_escape(s) for s in items)
 
     def render_education(entries):
         out = []
         for e in entries:
+            # Drop rows with no institution AND no degree — corrupt
+            # auto-seed artifacts from messy PDF extraction.
+            inst = (e.institution or "").strip()
+            deg = (e.degree or "").strip()
+            if not inst and not deg:
+                continue
+            # Drop rows where the "degree" field has eaten a sentence
+            # fragment (parser glued unrelated text into degree). Cap
+            # length at 180 chars and require it not look like a
+            # full bullet (no period mid-string before a capital).
+            if len(deg) > 180 or re.search(r"\.\s+[A-Z]", deg):
+                deg = ""
             out.append({
-                "institution": e.institution,
-                "degree": e.degree,
+                "institution": inst,
+                "degree": deg,
                 "period": e.period,
                 "highlights": [render_bullet(h) for h in (e.highlights or [])],
             })
@@ -571,8 +600,13 @@ def render_cv(
     def render_projects(entries):
         out = []
         for p in entries:
+            title = (p.title or "").strip()
+            # Drop entries with no real title — LLM polish sometimes
+            # returns a project named "Project" with melted highlights.
+            if not title or title.lower() in {"project", "untitled"}:
+                continue
             out.append({
-                "title": p.title,
+                "title": title,
                 "period": p.period,
                 "highlights": [render_bullet(h) for h in (p.highlights or [])],
             })
@@ -581,8 +615,11 @@ def render_cv(
     def render_experience(entries):
         out = []
         for x in entries:
+            title = (x.title or "").strip()
+            if not title:
+                continue
             out.append({
-                "title": x.title,
+                "title": title,
                 "company": x.company,
                 "period": x.period,
                 "highlights": [render_bullet(h) for h in (x.highlights or [])],
