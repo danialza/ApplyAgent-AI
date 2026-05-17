@@ -492,6 +492,11 @@ class CVLibraryBase(BaseModel):
     publications: list[PublicationEntry] = Field(default_factory=list)
     certifications: list[CertificationEntry] = Field(default_factory=list)
     languages: list[str] = Field(default_factory=list)
+    # Project title → personal blog/portfolio URL. Populated from
+    # the `## Project Links` section of cv.md. Renderer uses this
+    # instead of any GitHub URL the project might carry — user
+    # preference is blog-first.
+    project_links: dict[str, str] = Field(default_factory=dict)
 
 
 class CVLibraryOut(CVLibraryBase):

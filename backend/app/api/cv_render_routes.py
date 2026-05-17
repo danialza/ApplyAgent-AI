@@ -53,6 +53,7 @@ def _to_out(row: CVLibrary) -> CVLibraryOut:
         publications=row.publications or [],
         certifications=row.certifications or [],
         languages=row.languages or [],
+        project_links=getattr(row, "project_links", None) or {},
         updated_at=row.updated_at or datetime.utcnow(),
         manually_edited_at=getattr(row, "manually_edited_at", None),
     )

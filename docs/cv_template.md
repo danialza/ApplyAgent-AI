@@ -166,6 +166,25 @@ Omit this section entirely if you don't want stretch claims.
 - **Published**: Paper Title — Venue, Year
 - **Under Submission**: Working Title
 
+## Project Links
+
+<!--
+Optional. Maps project titles to their personal-blog / portfolio
+pages. The tailored renderer uses these URLs (NOT GitHub) when it
+wraps a project title in a clickable link, and auto-appends UTM
+params (?utm_source=cv&utm_medium=pdf&utm_campaign=<company-slug>)
+so you can see in analytics which application drove the click.
+
+Format: `- ProjectTitle: https://...`. Title must roughly match
+the project's title in the Selected/Additional sections — the
+matcher is case-insensitive and ignores spaces/punctuation, so
+"TalkingHeadAI" and "Talking Head AI" both resolve to the same key.
+-->
+
+- TalkingHeadAI: https://danielz.co.uk/projects/talkinghead-ai
+- NED 3 Pro DRL Sim-to-Real Reaching: https://danielz.co.uk/projects/ned3-pro-drl
+- NSP AI Enquiry Workflow: https://danielz.co.uk/projects/nsp-workflow
+
 ## Languages
 
 <!--

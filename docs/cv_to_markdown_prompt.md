@@ -39,6 +39,8 @@ the candidate's full name. The last non-empty section must be
    - `## Professional Experience`
    - `## Certifications`
    - `## Publications`
+   - `## Project Links` (optional — only emit when the source CV
+     lists blog/portfolio URLs per project)
    - `## Languages`
    Omit any section that has no source content — don't emit an empty
    header.

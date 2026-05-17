@@ -138,6 +138,7 @@ def parse_cv_markdown(text: str) -> CVLibraryBase:
     languages: list[str] = []
     skills_groups: list[SkillGroup] = []
     core_competencies: list[CompetencyEntry] = []
+    project_links: dict[str, str] = {}
     summary_lines: list[str] = []
 
     current_entry: dict | None = None
@@ -288,11 +289,24 @@ def parse_cv_markdown(text: str) -> CVLibraryBase:
             if line.startswith("- "):
                 languages.append(_strip_bold(line[2:].strip()))
 
+        elif section == "project_links":
+            # "- ProjectTitle: https://blog.example.com/project-slug"
+            # Strips bold around the title, captures the URL.
+            if line.startswith("- "):
+                body = _strip_bold(line[2:].strip())
+                m = re.match(r"^(.+?)\s*[:\-]\s*(https?://\S+)\s*$", body)
+                if m:
+                    title = m.group(1).strip()
+                    url = m.group(2).rstrip(".,;)")
+                    if title and url:
+                        project_links[title] = url
+
     _flush_entry()
 
     out.summary = " ".join(summary_lines).strip()
     out.skills_groups = skills_groups
     out.core_competencies = core_competencies
+    out.project_links = project_links
     out.education = education
     out.selected_projects = selected
     out.additional_projects = additional
@@ -329,6 +343,8 @@ _SECTION_MAP: dict[str, str] = {
     "publications": "publications",
     "papers": "publications",
     "languages": "languages",
+    "project links": "project_links",
+    "project urls": "project_links",
 }
 
 

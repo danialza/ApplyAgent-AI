@@ -424,14 +424,41 @@ def _website_url(portfolio: str) -> str:
 
 # ---------- Public ----------
 
-def _promote_project_urls(entries: list[ProjectEntry]) -> None:
-    """For each project that has no `url` set, scan its highlights for
-    the first http(s) link and lift it into the field. Strips any
-    "Source: <url>" leading bullet the web ingester used to add."""
+def _promote_project_urls(
+    entries: list[ProjectEntry],
+    project_links: dict[str, str] | None = None,
+) -> None:
+    """For each project without `url`, prefer:
+      1. project_links[title]     — explicit blog/portfolio mapping
+                                    from cv.md's ## Project Links section.
+         Falls back to a fuzzy lower-case match.
+      2. First non-GitHub http(s) link found in highlights.
+
+    GitHub URLs are intentionally skipped (user preference: blog
+    links only). Also strips any leading "Source: <url>" bullet
+    web-ingest used to add."""
     url_re = re.compile(r"https?://[^\s)]+")
+    links = project_links or {}
+    # Pre-build a normalised lookup so "TalkingHeadAI" matches
+    # "talking head ai" / "talkinghead-ai" / etc.
+    def _norm(s: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+    norm_links = {_norm(k): v for k, v in links.items()}
+
     for p in entries or []:
         if (p.url or "").strip():
             continue
+        # 1. Mapped blog URL takes priority.
+        title_key = _norm(p.title)
+        if title_key and title_key in norm_links:
+            p.url = norm_links[title_key]
+            # Drop "Source: <github>" bullets — they duplicate intent.
+            p.highlights = [
+                h for h in (p.highlights or [])
+                if not (h or "").strip().lower().startswith("source:")
+            ]
+            continue
+        # 2. Scan highlights, skipping GitHub URLs.
         new_highlights: list[str] = []
         chosen: str = ""
         for b in (p.highlights or []):
@@ -439,12 +466,13 @@ def _promote_project_urls(entries: list[ProjectEntry]) -> None:
             stripped = text.strip()
             if not chosen and stripped.lower().startswith("source:"):
                 m = url_re.search(stripped)
-                if m:
+                if m and "github.com" not in m.group(0).lower():
                     chosen = m.group(0).rstrip(".,;)")
-                    continue  # drop the bullet entirely
+                # Drop "Source:" bullet either way (GitHub link or not).
+                continue
             if not chosen:
                 m = url_re.search(text)
-                if m:
+                if m and "github.com" not in m.group(0).lower():
                     chosen = m.group(0).rstrip(".,;)")
             new_highlights.append(text)
         if chosen:
@@ -720,12 +748,17 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
                 url=project_url,
             )], sk)
 
-    # Post-merge sweep: for every project without a url, lift the first
-    # http(s) link out of highlights into the dedicated url field.
-    # Drops the leading "Source: " bullet that web ingest used to add.
-    _promote_project_urls(selected_acc)
-    _promote_project_urls(additional_acc)
-    _promote_project_urls(generic_acc)
+    # Carry existing project_links across the rebuild so blog-mapping
+    # set via cv.md survives a CV / URL source change.
+    from app.models.db_models import CVLibrary as _CVLibrary
+    existing_row = db.query(_CVLibrary).filter(_CVLibrary.id == 1).first()
+    project_links = dict((getattr(existing_row, "project_links", None) or {})) if existing_row else {}
+
+    # Post-merge sweep: pick blog URL from project_links map first,
+    # else first non-github URL in highlights.
+    _promote_project_urls(selected_acc, project_links)
+    _promote_project_urls(additional_acc, project_links)
+    _promote_project_urls(generic_acc, project_links)
 
     if selected_acc or additional_acc:
         # CV provided explicit split — respect it. Generic projects join
@@ -818,6 +851,7 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
         publications=publications,
         certifications=certifications,
         languages=languages,
+        project_links=project_links,  # carried forward from existing row
     )
     # LLM-driven curation: collapse near-duplicate project titles
     # across sources (e.g. CV "TalkingHeadAI" + GitHub repo

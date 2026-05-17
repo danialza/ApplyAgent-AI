@@ -145,6 +145,11 @@ class CVLibrary(Base):
     # info-level "user override active" issues.
     user_patches: Mapped[list[Any]] = mapped_column(JSON, default=list)
 
+    # Project title → blog/portfolio URL map, populated from cv.md's
+    # `## Project Links` section. Renderer uses this as the source
+    # of truth for project hrefs; GitHub URLs are skipped.
+    project_links: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
 
 class WebSource(Base):
     """External web artifact the user pointed us at (portfolio site,
