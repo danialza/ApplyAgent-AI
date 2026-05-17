@@ -5,8 +5,10 @@ import {
   applyLibraryFix,
   fetchCVLibrary,
   fetchLibraryIssues,
+  ignoreIssue,
   putCVLibrary,
   rebuildLibraryForce,
+  unignoreAllIssues,
   unlockLibrary,
   type LibraryIssue,
 } from "@/lib/api";
@@ -35,6 +37,7 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
   const [error, setError] = useState<string | null>(null);
   const [issues, setIssues] = useState<LibraryIssue[]>([]);
   const [issuesLLM, setIssuesLLM] = useState(false);
+  const [ignoredCount, setIgnoredCount] = useState(0);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorJson, setEditorJson] = useState("");
   const [editorSaving, setEditorSaving] = useState(false);
@@ -84,10 +87,11 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
       });
     // Audit in parallel; cheap deterministic + one LLM call.
     fetchLibraryIssues()
-      .then((r) => {
+      .then((r: any) => {
         if (!cancelled) {
           setIssues(r.issues || []);
           setIssuesLLM(!!r.llm_used);
+          setIgnoredCount(r.ignored_count || 0);
         }
       })
       .catch(() => undefined);
@@ -137,6 +141,26 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
             ⚠ Master CV audit · {errorCount} errors · {warnCount} warnings ·{" "}
             {issues.length - errorCount - warnCount} info
             {issuesLLM && <span className="ml-2 text-[10px] font-normal opacity-70">(includes LLM analysis)</span>}
+            {ignoredCount > 0 && (
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  if (!confirm(`Un-ignore all ${ignoredCount} dismissed issues? They'll re-appear in the next audit.`)) return;
+                  try {
+                    await unignoreAllIssues();
+                    window.location.reload();
+                  } catch (err) {
+                    alert(err instanceof Error ? err.message : "Reset failed");
+                  }
+                }}
+                className="ml-2 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+                title="Bring back all ignored audit issues"
+              >
+                Reset {ignoredCount} ignored
+              </button>
+            )}
           </summary>
           <ul className="mt-2 space-y-1">
             {issues.map((iss, i) => {
@@ -154,31 +178,48 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
                     <p className={`font-semibold ${cls}`}>
                       {dot} [{iss.scope}] {iss.title}
                     </p>
-                    {iss.fix_action && (
+                    <div className="flex shrink-0 gap-1">
+                      {iss.fix_action && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!confirm(
+                              `Apply this fix?\n\n${iss.fix_action!.preview}\n\nThis will lock the master CV (auto-rebuild paused until you unlock).`
+                            )) return;
+                            try {
+                              await applyLibraryFix({
+                                kind: iss.fix_action!.kind,
+                                payload: iss.fix_action!.payload,
+                              });
+                              window.location.reload();
+                            } catch (e) {
+                              alert(e instanceof Error ? e.message : "Apply failed");
+                            }
+                          }}
+                          className="rounded border border-slate-700 bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-slate-900"
+                          title={`Preview: ${iss.fix_action.preview}`}
+                        >
+                          Apply fix
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={async () => {
-                          if (!confirm(
-                            `Apply this fix?\n\n${iss.fix_action!.preview}\n\nThis will lock the master CV (auto-rebuild paused until you unlock).`
-                          )) return;
                           try {
-                            await applyLibraryFix({
-                              kind: iss.fix_action!.kind,
-                              payload: iss.fix_action!.payload,
-                            });
-                            // Bumping refreshKey is the parent's job;
-                            // simplest path: force a reload of audit + lib.
-                            window.location.reload();
+                            await ignoreIssue(iss.fingerprint);
+                            // Hide locally without full reload — UX win.
+                            setIssues((prev) => prev.filter((x) => x.fingerprint !== iss.fingerprint));
+                            setIgnoredCount((n) => n + 1);
                           } catch (e) {
-                            alert(e instanceof Error ? e.message : "Apply failed");
+                            alert(e instanceof Error ? e.message : "Ignore failed");
                           }
                         }}
-                        className="shrink-0 rounded border border-slate-700 bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-slate-900"
-                        title={`Preview: ${iss.fix_action.preview}`}
+                        className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+                        title="Don't show this issue again. Reset via the link in the header."
                       >
-                        Apply fix
+                        Ignore
                       </button>
-                    )}
+                    </div>
                   </div>
                   {iss.detail && (
                     <p className="text-slate-600">{iss.detail}</p>

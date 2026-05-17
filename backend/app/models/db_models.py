@@ -133,6 +133,11 @@ class CVLibrary(Base):
         DateTime, nullable=True, default=None
     )
 
+    # Audit issues the user has dismissed. Each entry is a SHA-1
+    # fingerprint of "<scope>|<title.lower>" so LLM-rephrased
+    # near-duplicates collide. Audit endpoint filters them out.
+    ignored_issues: Mapped[list[Any]] = mapped_column(JSON, default=list)
+
 
 class WebSource(Base):
     """External web artifact the user pointed us at (portfolio site,

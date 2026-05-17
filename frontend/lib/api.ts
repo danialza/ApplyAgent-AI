@@ -298,6 +298,7 @@ export interface LibraryIssue {
     payload: Record<string, any>;
     preview: string;
   } | null;
+  fingerprint: string;
 }
 
 export async function fetchLibraryIssues(): Promise<{
@@ -328,6 +329,22 @@ export async function unlockLibrary(): Promise<any> {
 
 export async function rebuildLibraryForce(): Promise<any> {
   const res = await fetch(`${API_BASE}/api/cv/library/rebuild?force=true`, { method: "POST" });
+  return handle(res);
+}
+
+export async function ignoreIssue(fp: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/cv/library/issues/ignore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fingerprint: fp }),
+  });
+  return handle(res);
+}
+
+export async function unignoreAllIssues(): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/cv/library/issues/ignore`, {
+    method: "DELETE",
+  });
   return handle(res);
 }
 

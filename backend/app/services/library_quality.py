@@ -57,6 +57,10 @@ class Issue(BaseModel):
     detail: str = ""      # longer explanation, surfaces in tooltip
     fix_hint: str = ""    # suggested action (free text)
     fix_action: Optional["FixAction"] = None  # machine-applicable patch (optional)
+    # Stable hash of (scope, title.lower) — UI uses this to ignore
+    # and unignore. Populated at response-build time so the model
+    # itself never needs to compute it.
+    fingerprint: str = ""
 
 
 class IssuesResponse(BaseModel):
@@ -67,7 +71,12 @@ class IssuesResponse(BaseModel):
 
 # ---------- Public entry ----------
 
-def audit(library: CVLibraryOut, *, use_llm: bool = True) -> IssuesResponse:
+def audit(
+    library: CVLibraryOut,
+    *,
+    use_llm: bool = True,
+    ignored_fingerprints: set[str] | None = None,
+) -> IssuesResponse:
     issues: list[Issue] = []
     issues.extend(_check_education(library))
     issues.extend(_check_projects(library))
@@ -82,6 +91,12 @@ def audit(library: CVLibraryOut, *, use_llm: bool = True) -> IssuesResponse:
             issues.extend(llm_issues)
             llm_used = True
 
+    # Stamp fingerprint on every issue + filter ignored.
+    for iss in issues:
+        iss.fingerprint = fingerprint(iss.scope, iss.title)
+    if ignored_fingerprints:
+        issues = [i for i in issues if i.fingerprint not in ignored_fingerprints]
+
     counts = {
         "error": sum(1 for i in issues if i.severity == "error"),
         "warning": sum(1 for i in issues if i.severity == "warning"),
@@ -89,6 +104,15 @@ def audit(library: CVLibraryOut, *, use_llm: bool = True) -> IssuesResponse:
         "total": len(issues),
     }
     return IssuesResponse(issues=issues, counts=counts, llm_used=llm_used)
+
+
+def fingerprint(scope: str, title: str) -> str:
+    """Stable hash of an issue's identity. LLM-rephrased near-dupes
+    collide when (scope, title) is the same — good enough for ignore
+    lists. Lower-cases title; preserves scope exactly."""
+    import hashlib
+    raw = f"{scope}|{title.strip().lower()}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
 # ---------- Deterministic checks ----------

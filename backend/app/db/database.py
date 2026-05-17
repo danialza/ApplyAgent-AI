@@ -60,6 +60,7 @@ def _add_missing_columns() -> None:
     additions: list[tuple[str, str, str, str]] = [
         ("cv_library", "core_competencies", "JSON", "'[]'"),
         ("cv_library", "manually_edited_at", "TIMESTAMP", "NULL"),
+        ("cv_library", "ignored_issues", "JSON", "'[]'"),
         ("applications", "cv_latex", "TEXT", "''"),
         ("applications", "cv_pdf_b64", "TEXT", "''"),
         ("applications", "cv_filename", "VARCHAR(255)", "''"),

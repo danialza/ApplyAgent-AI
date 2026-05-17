@@ -97,12 +97,8 @@ def get_template() -> dict:
 
 @router.get("/library/issues")
 def library_issues(db: Session = Depends(get_db)) -> dict:
-    """Audit the master library for parse garbage, near-dupes, and
-    cross-source conflicts. Combines deterministic checks with an
-    optional LLM pass that spots harder problems (timeline gaps,
-    unsupported summary claims). Used by the UI to show a warning
-    banner before the user renders a tailored CV from a bad master.
-    """
+    """Audit the master library. Filters out issues the user has
+    previously dismissed (stored on cv_library.ignored_issues)."""
     from app.services.library_quality import audit
 
     row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
@@ -110,8 +106,47 @@ def library_issues(db: Session = Depends(get_db)) -> dict:
         return {"issues": [], "counts": {"total": 0}, "llm_used": False,
                 "error": "No library yet."}
     library_out = _to_out(row)
-    result = audit(library_out, use_llm=True)
-    return result.model_dump()
+    ignored = set(getattr(row, "ignored_issues", None) or [])
+    result = audit(library_out, use_llm=True, ignored_fingerprints=ignored)
+    payload = result.model_dump()
+    payload["ignored_count"] = len(ignored)
+    return payload
+
+
+@router.post("/library/issues/ignore")
+def ignore_issue(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """Add an issue fingerprint to the ignore list. Body:
+    ``{"fingerprint": "<sha1>"}`` OR ``{"scope": "...", "title": "..."}``.
+    Same issue (across LLM rephrasings of nearly-identical title) stays
+    hidden on future audits."""
+    from app.services.library_quality import fingerprint as _fp
+    row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No library yet.")
+    fp = (payload or {}).get("fingerprint", "")
+    if not fp:
+        scope = (payload or {}).get("scope", "")
+        title = (payload or {}).get("title", "")
+        if not scope and not title:
+            raise HTTPException(status_code=400, detail="Provide fingerprint or scope+title.")
+        fp = _fp(scope, title)
+    current = list(getattr(row, "ignored_issues", None) or [])
+    if fp not in current:
+        current.append(fp)
+    row.ignored_issues = current
+    db.commit()
+    return {"fingerprint": fp, "ignored_count": len(current)}
+
+
+@router.delete("/library/issues/ignore")
+def unignore_all(db: Session = Depends(get_db)) -> dict:
+    """Clear the entire ignore list — next audit re-surfaces everything."""
+    row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No library yet.")
+    row.ignored_issues = []
+    db.commit()
+    return {"ignored_count": 0}
 
 
 @router.post("/library/apply-fix", response_model=CVLibraryOut)
