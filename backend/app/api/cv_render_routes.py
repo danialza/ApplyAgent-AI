@@ -151,106 +151,36 @@ def unignore_all(db: Session = Depends(get_db)) -> dict:
 
 @router.post("/library/apply-fix", response_model=CVLibraryOut)
 def apply_fix(payload: dict, db: Session = Depends(get_db)) -> CVLibraryOut:
-    """Apply a structured `FixAction` from the library audit.
+    """Apply a structured FixAction from the library audit.
 
-    Body shape: ``{"kind": "drop_entry"|"split_education"|"set_field"|...,
-    "payload": {...}}``. Mutates the master library in place AND
-    locks it (sets manually_edited_at) so the fix isn't blown away
-    by the next source upload.
-
-    Supported kinds:
-      drop_entry        — payload: {section, index}
-      split_education   — payload: {section: "education", index,
-                                    new_institution, new_degree}
-      set_field         — payload: {section, index, field, value}
-      truncate_field    — payload: {section, index, field, max_chars}
-      set_summary       — payload: {value}
-      set_header_field  — payload: {field, value}
+    Body: ``{"kind": "...", "payload": {...}}``. The action is
+    applied to the live library AND appended to user_patches so
+    subsequent source-rebuilds replay it (your edit wins).
+    Does NOT lock the library — auto-rebuilds from new sources keep
+    flowing in, with your patches applied on top.
     """
+    from app.services.user_patches import apply_action, validate_action
+
     kind = (payload or {}).get("kind", "")
     p = (payload or {}).get("payload", {}) or {}
+    if not kind:
+        raise HTTPException(status_code=400, detail="Missing 'kind'.")
     row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
     if row is None:
         raise HTTPException(status_code=404, detail="No library.")
-
-    def _list_for(section: str):
-        mapping = {
-            "selected_projects": (row.selected_projects or []),
-            "additional_projects": (row.additional_projects or []),
-            "experience": (row.experience or []),
-            "education": (row.education or []),
-            "certifications": (row.certifications or []),
-            "publications": (row.publications or []),
-        }
-        return mapping.get(section)
-
-    def _save_list(section: str, new_list: list):
-        setattr(row, section, new_list)
-
-    if kind == "drop_entry":
-        section = p.get("section", "")
-        idx = int(p.get("index", -1))
-        lst = _list_for(section)
-        if lst is None or idx < 0 or idx >= len(lst):
-            raise HTTPException(status_code=400, detail=f"Bad drop_entry payload: {p}")
-        new_list = list(lst)
-        new_list.pop(idx)
-        _save_list(section, new_list)
-    elif kind == "split_education":
-        idx = int(p.get("index", -1))
-        edu = list(row.education or [])
-        if idx < 0 or idx >= len(edu):
-            raise HTTPException(status_code=400, detail=f"Bad split_education index: {idx}")
-        entry = dict(edu[idx]) if isinstance(edu[idx], dict) else edu[idx].copy() if hasattr(edu[idx], "copy") else {}
-        # Library JSON columns store dicts already.
-        if not isinstance(edu[idx], dict):
-            entry = edu[idx]
-        entry["institution"] = (p.get("new_institution") or "").strip()
-        entry["degree"] = (p.get("new_degree") or "").strip()
-        edu[idx] = entry
-        _save_list("education", edu)
-    elif kind == "set_field":
-        section = p.get("section", "")
-        idx = int(p.get("index", -1))
-        field = p.get("field", "")
-        value = p.get("value", "")
-        lst = _list_for(section)
-        if lst is None or idx < 0 or idx >= len(lst) or not field:
-            raise HTTPException(status_code=400, detail=f"Bad set_field payload: {p}")
-        new_list = list(lst)
-        target = dict(new_list[idx]) if not isinstance(new_list[idx], dict) else new_list[idx]
-        target[field] = value
-        new_list[idx] = target
-        _save_list(section, new_list)
-    elif kind == "truncate_field":
-        section = p.get("section", "")
-        idx = int(p.get("index", -1))
-        field = p.get("field", "")
-        max_chars = int(p.get("max_chars", 180))
-        lst = _list_for(section)
-        if lst is None or idx < 0 or idx >= len(lst) or not field:
-            raise HTTPException(status_code=400, detail=f"Bad truncate_field payload: {p}")
-        new_list = list(lst)
-        target = new_list[idx] if isinstance(new_list[idx], dict) else dict(new_list[idx])
-        cur = (target.get(field) or "")[:max_chars]
-        target[field] = cur
-        new_list[idx] = target
-        _save_list(section, new_list)
-    elif kind == "set_summary":
-        row.summary = (p.get("value") or "").strip()
-    elif kind == "set_header_field":
-        field = p.get("field", "")
-        value = p.get("value", "")
-        if not field:
-            raise HTTPException(status_code=400, detail="Missing field name.")
-        header = dict(row.header or {})
-        header[field] = value
-        row.header = header
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown fix kind: {kind!r}")
-
+    try:
+        validate_action(kind, p)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        apply_action(row, kind, p)
+    except (IndexError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Apply failed: {exc}") from exc
+    # Record so rebuilds replay.
+    patches = list(getattr(row, "user_patches", None) or [])
+    patches.append({"kind": kind, "payload": p})
+    row.user_patches = patches
     row.updated_at = datetime.utcnow()
-    row.manually_edited_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
     return _to_out(row)

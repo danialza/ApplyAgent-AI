@@ -125,18 +125,25 @@ class CVLibrary(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
-    # When set, the user hand-edited the library and auto-rebuilds
-    # are skipped to preserve their changes. POST /api/cv/library/rebuild?force=true
-    # overrides. Set automatically by PUT /api/cv/library and the
-    # apply-fix endpoint; cleared by force-rebuild.
+    # Set only by PUT /api/cv/library (full JSON edit). Apply-fix
+    # does NOT lock — it appends to user_patches and replays. The
+    # lock blocks auto-rebuilds entirely; force=true overrides.
     manually_edited_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True, default=None
     )
 
-    # Audit issues the user has dismissed. Each entry is a SHA-1
-    # fingerprint of "<scope>|<title.lower>" so LLM-rephrased
-    # near-duplicates collide. Audit endpoint filters them out.
+    # Audit issues the user dismissed. Each entry is a SHA-1
+    # fingerprint of "<scope>|<topic>" (or fallback "<scope>|<title.lower>"
+    # when topic missing). Topic is a stable category like
+    # "future_date" so LLM-rephrased near-dupes collide.
     ignored_issues: Mapped[list[Any]] = mapped_column(JSON, default=list)
+
+    # User patches applied via Apply Fix. List of FixAction dicts
+    # ``{"kind": "...", "payload": {...}}``. Re-applied after every
+    # auto-rebuild so source changes don't blow away the user's
+    # corrections. Conflicting source values surface in the audit as
+    # info-level "user override active" issues.
+    user_patches: Mapped[list[Any]] = mapped_column(JSON, default=list)
 
 
 class WebSource(Base):

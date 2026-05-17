@@ -57,9 +57,13 @@ class Issue(BaseModel):
     detail: str = ""      # longer explanation, surfaces in tooltip
     fix_hint: str = ""    # suggested action (free text)
     fix_action: Optional["FixAction"] = None  # machine-applicable patch (optional)
-    # Stable hash of (scope, title.lower) — UI uses this to ignore
-    # and unignore. Populated at response-build time so the model
-    # itself never needs to compute it.
+    # Stable category — "future_date" / "run_together_words" /
+    # "summary_truncated" etc. Used in the fingerprint so LLM-
+    # rephrased near-dupes of the same complaint collide and a
+    # one-time Ignore stays sticky.
+    topic: str = ""
+    # Stable hash of (scope, topic) when topic present, fallback
+    # (scope, title.lower) otherwise.
     fingerprint: str = ""
 
 
@@ -91,9 +95,10 @@ def audit(
             issues.extend(llm_issues)
             llm_used = True
 
-    # Stamp fingerprint on every issue + filter ignored.
+    # Stamp fingerprint on every issue (topic-first, title fallback)
+    # + filter ignored.
     for iss in issues:
-        iss.fingerprint = fingerprint(iss.scope, iss.title)
+        iss.fingerprint = fingerprint(iss.scope, iss.topic or iss.title)
     if ignored_fingerprints:
         issues = [i for i in issues if i.fingerprint not in ignored_fingerprints]
 
@@ -131,7 +136,7 @@ def _check_education(library: CVLibraryOut) -> list[Issue]:
 
         if not inst and not deg:
             out.append(Issue(
-                severity="error", scope=scope,
+                severity="error", scope=scope, topic="empty_education_row",
                 title="Empty education row",
                 detail="Both institution and degree are blank.",
                 fix_hint="Remove this entry from the source or re-upload a clean cv.md.",
@@ -151,7 +156,7 @@ def _check_education(library: CVLibraryOut) -> list[Issue]:
             new_inst = next((p for p in parts if inst_re.match(p)), parts[1] if len(parts) > 1 else "")
             new_deg = next((p for p in parts if deg_re.match(p)), parts[0])
             out.append(Issue(
-                severity="warning", scope=scope,
+                severity="warning", scope=scope, topic="overlong_institution",
                 title=f"Overlong institution: {inst[:60]}…",
                 detail="Parser stuffed the whole row into institution. Click "
                        "Apply to split into clean institution + degree fields.",
@@ -165,7 +170,7 @@ def _check_education(library: CVLibraryOut) -> list[Issue]:
             ))
         if deg and (len(deg) > 180 or re.search(r"\.\s+[A-Z]", deg)):
             out.append(Issue(
-                severity="warning", scope=scope,
+                severity="warning", scope=scope, topic="degree_prose",
                 title="Degree field looks like prose",
                 detail=f"Degree text: {deg[:80]}…",
                 fix_hint="Edit library JSON or upload clean cv.md.",
@@ -176,7 +181,7 @@ def _check_education(library: CVLibraryOut) -> list[Issue]:
             if key in seen_inst:
                 prev = seen_inst[key]
                 out.append(Issue(
-                    severity="warning", scope=scope,
+                    severity="warning", scope=scope, topic="duplicate_institution",
                     title=f"Duplicate institution: {inst[:60]}",
                     detail=f"Also appears at education[{prev}]. Check the "
                            "degree/period fields differ intentionally.",
@@ -201,7 +206,7 @@ def _check_projects(library: CVLibraryOut) -> list[Issue]:
             sec, real_idx = "additional_projects", i - n_sel
         if not title:
             out.append(Issue(
-                severity="error", scope=scope,
+                severity="error", scope=scope, topic="project_no_title",
                 title="Project with no title",
                 detail="Renderer drops these silently. Likely an LLM-polish artifact.",
                 fix_hint="Click Apply to drop, or edit library JSON.",
@@ -214,7 +219,7 @@ def _check_projects(library: CVLibraryOut) -> list[Issue]:
             continue
         if title.lower() in {"project", "untitled", "unknown"}:
             out.append(Issue(
-                severity="error", scope=scope,
+                severity="error", scope=scope, topic="project_placeholder_title",
                 title=f"Placeholder title: {title!r}",
                 detail="Looks like a corrupt entry.",
                 fix_hint="Click Apply to drop.",
@@ -226,7 +231,7 @@ def _check_projects(library: CVLibraryOut) -> list[Issue]:
             ))
         if not p.highlights:
             out.append(Issue(
-                severity="info", scope=scope,
+                severity="info", scope=scope, topic="project_no_bullets",
                 title=f"Project '{title}' has no bullets",
                 detail="Renderer will show the title and date but no content.",
                 fix_hint="Add bullets in the source CV / cv.md.",
@@ -235,7 +240,7 @@ def _check_projects(library: CVLibraryOut) -> list[Issue]:
         norm = re.sub(r"[^a-z0-9]+", "", title.lower())
         if norm in seen:
             out.append(Issue(
-                severity="warning", scope=scope,
+                severity="warning", scope=scope, topic="project_near_duplicate",
                 title=f"Near-duplicate of {seen[norm]!r}",
                 detail=f"Both projects normalise to {norm!r}. Merge into one entry.",
                 fix_hint="Delete the smaller source or unify titles in cv.md.",
@@ -254,7 +259,7 @@ def _check_experience(library: CVLibraryOut) -> list[Issue]:
         company = (x.company or "").strip()
         if not title:
             out.append(Issue(
-                severity="error", scope=scope,
+                severity="error", scope=scope, topic="experience_no_title",
                 title="Experience entry with no role title",
                 fix_hint="Drop or fix in source CV.",
             ))
@@ -264,7 +269,7 @@ def _check_experience(library: CVLibraryOut) -> list[Issue]:
             prev_i, prev_period = seen[key]
             if (x.period or "") != prev_period:
                 out.append(Issue(
-                    severity="warning", scope=scope,
+                    severity="warning", scope=scope, topic="experience_period_conflict",
                     title=f"Conflicting periods for {title} @ {company}",
                     detail=f"experience[{prev_i}] says {prev_period!r}; "
                            f"this one says {x.period!r}.",
@@ -276,7 +281,7 @@ def _check_experience(library: CVLibraryOut) -> list[Issue]:
         for b in (x.highlights or []):
             if "  " not in b and re.search(r"[a-z][A-Z]", b):
                 out.append(Issue(
-                    severity="info", scope=scope,
+                    severity="info", scope=scope, topic="run_together_words",
                     title=f"Bullet on {title!r} has run-together words",
                     detail=f"Sample: {b[:80]}",
                     fix_hint="PDF parse artifact — upload cv.md to fix.",
@@ -290,13 +295,13 @@ def _check_header(library: CVLibraryOut) -> list[Issue]:
     h = library.header
     if not (h.name or "").strip():
         out.append(Issue(
-            severity="error", scope="header",
+            severity="error", scope="header", topic="missing_name",
             title="Missing candidate name",
             fix_hint="Add it to your cv.md or library JSON.",
         ))
     if not (h.email or "").strip():
         out.append(Issue(
-            severity="warning", scope="header",
+            severity="warning", scope="header", topic="missing_email",
             title="Missing email",
             fix_hint="Recruiters need a contact path.",
         ))
@@ -308,14 +313,14 @@ def _check_skills(library: CVLibraryOut) -> list[Issue]:
     total_items = sum(len(g.items or []) for g in (library.skills_groups or []))
     if total_items > 80:
         out.append(Issue(
-            severity="info", scope="skills",
+            severity="info", scope="skills", topic="skills_dense",
             title=f"Skills list is dense ({total_items} items)",
             detail="Recruiters skim. Consider trimming to 50–60 high-signal tokens.",
             fix_hint="Edit cv.md or library JSON.",
         ))
     if not (library.skills_groups or []):
         out.append(Issue(
-            severity="warning", scope="skills",
+            severity="warning", scope="skills", topic="skills_empty",
             title="No skills extracted",
             fix_hint="Check your CV / docs actually list skills.",
         ))
@@ -336,6 +341,7 @@ class _LLMIssue(BaseModel):
     title: str
     detail: str = ""
     fix_hint: str = ""
+    topic: str = ""
     fix_action: Optional[_LLMFixAction] = None
 
 
@@ -354,11 +360,20 @@ def _llm_audit(library: CVLibraryOut) -> list[Issue] | None:
         "You audit a candidate's master CV library for issues a "
         "recruiter would notice. Return a JSON object:\n"
         '  {"issues": [{"severity": "error|warning|info", '
-        '"scope": "education[0] | selected_projects[1] | additional_projects[2] '
-        '| experience[2] | certifications[0] | publications[0] | summary | header", '
+        '"scope": "education[0] | selected_projects[1] | ...", '
+        '"topic": "<stable_category_slug>", '
         '"title": "<short one-liner>", "detail": "<longer explanation>", '
         '"fix_hint": "<one short action>", "fix_action": null | '
         '{"kind": "...", "payload": {...}, "preview": "..."}}, ...]}\n\n'
+        "TOPIC is critical — it MUST be a short stable slug like "
+        "'future_date', 'period_conflict', 'summary_truncated', "
+        "'experience_overlap', 'overlong_field', 'run_together_words', "
+        "'duplicate_entry', 'unbacked_skill_claim', 'date_gap'. The "
+        "ignore-list keys off (scope, topic) — if you change the topic "
+        "string between runs, a user's Ignore won't stick. Same issue "
+        "type ALWAYS gets the same topic slug, even if the title text "
+        "varies. Use snake_case. Prefer reusing slugs over inventing "
+        "new ones.\n\n"
         "What to flag (limit total to 8 highest-impact issues):\n"
         "1. Same role/company spanning conflicting dates.\n"
         "2. Same project described differently in two entries.\n"
@@ -447,5 +462,6 @@ def _llm_audit(library: CVLibraryOut) -> list[Issue] | None:
         out.append(Issue(
             severity=ll.severity, scope=ll.scope, title=ll.title,
             detail=ll.detail, fix_hint=ll.fix_hint, fix_action=action,
+            topic=(ll.topic or "").strip(),
         ))
     return out

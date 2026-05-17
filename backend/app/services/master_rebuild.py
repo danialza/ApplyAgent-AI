@@ -49,6 +49,17 @@ def try_rebuild_master(db: Session, *, force: bool = False) -> bool:
         row.updated_at = datetime.utcnow()
         if force:
             row.manually_edited_at = None
+            row.user_patches = []  # explicit reset
+
+        # Replay user patches so Apply-Fix edits survive the rebuild.
+        # Skipped on force=true (user explicitly chose to discard).
+        if not force:
+            from app.services.user_patches import replay_patches
+            patches = list(getattr(row, "user_patches", None) or [])
+            if patches:
+                applied = replay_patches(row, patches)
+                logger.info("Replayed %d/%d user patches after rebuild", applied, len(patches))
+
         db.commit()
         return True
     except Exception as exc:  # noqa: BLE001

@@ -184,7 +184,7 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
                           type="button"
                           onClick={async () => {
                             if (!confirm(
-                              `Apply this fix?\n\n${iss.fix_action!.preview}\n\nThis will lock the master CV (auto-rebuild paused until you unlock).`
+                              `Apply this fix?\n\n${iss.fix_action!.preview}\n\nThis edit becomes a user-patch and will re-apply automatically after future source rebuilds — your edits always win.`
                             )) return;
                             try {
                               await applyLibraryFix({

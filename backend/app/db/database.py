@@ -61,6 +61,7 @@ def _add_missing_columns() -> None:
         ("cv_library", "core_competencies", "JSON", "'[]'"),
         ("cv_library", "manually_edited_at", "TIMESTAMP", "NULL"),
         ("cv_library", "ignored_issues", "JSON", "'[]'"),
+        ("cv_library", "user_patches", "JSON", "'[]'"),
         ("applications", "cv_latex", "TEXT", "''"),
         ("applications", "cv_pdf_b64", "TEXT", "''"),
         ("applications", "cv_filename", "VARCHAR(255)", "''"),
