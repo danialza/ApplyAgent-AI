@@ -13,6 +13,7 @@ export interface Application {
   jd_hash: string;
   has_cv_latex: boolean;
   has_cv_pdf: boolean;
+  has_jd: boolean;
   cv_filename: string;
   created_at: string;
   updated_at: string;

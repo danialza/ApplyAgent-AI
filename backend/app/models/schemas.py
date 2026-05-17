@@ -722,6 +722,7 @@ class ApplicationOut(ApplicationBase):
     # actual content is served via /api/applications/{id}/cv.tex|cv.pdf.
     has_cv_latex: bool = False
     has_cv_pdf: bool = False
+    has_jd: bool = False
     cv_filename: str = ""
     created_at: datetime
     updated_at: datetime

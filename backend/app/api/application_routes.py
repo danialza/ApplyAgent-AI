@@ -77,6 +77,7 @@ def _to_out(row: Application) -> ApplicationOut:
         jd_hash=row.jd_hash or "",
         has_cv_latex=bool(getattr(row, "cv_latex", "") or ""),
         has_cv_pdf=bool(getattr(row, "cv_pdf_b64", "") or ""),
+        has_jd=bool((getattr(row, "jd_text", "") or "").strip()),
         cv_filename=getattr(row, "cv_filename", "") or "",
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -166,6 +167,25 @@ def download_cv_latex(app_id: int, db: Session = Depends(get_db)) -> Response:
     return Response(
         content=row.cv_latex,
         media_type="application/x-tex; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/{app_id}/jd.txt")
+def download_jd(app_id: int, db: Session = Depends(get_db)) -> Response:
+    """Serve the JD text snapshot taken when the row was tracked.
+    Useful for re-rendering a tailored CV later without re-finding
+    the original posting."""
+    row = db.query(Application).filter(Application.id == app_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    if not (row.jd_text or "").strip():
+        raise HTTPException(status_code=404, detail="No JD text saved for this application.")
+    company = (row.company or "company").strip().lower().replace(" ", "-")
+    filename = f"jd-{company}-{row.id}.txt"
+    return Response(
+        content=row.jd_text,
+        media_type="text/plain; charset=utf-8",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 

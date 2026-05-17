@@ -283,6 +283,10 @@ export function applicationCvPdfUrl(id: number): string {
   return `${API_BASE}/api/applications/${id}/cv.pdf`;
 }
 
+export function applicationJdTxtUrl(id: number): string {
+  return `${API_BASE}/api/applications/${id}/jd.txt`;
+}
+
 // ---------- Unified sources ----------
 
 import type { UnifiedSource, WebSourceOut } from "./types";

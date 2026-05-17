@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   applicationCvPdfUrl,
   applicationCvTexUrl,
+  applicationJdTxtUrl,
   applicationsCsvUrl,
   deleteApplication,
   listApplications,
@@ -237,13 +238,24 @@ export default function ApplicationsPanel({ onError, refreshKey = 0 }: Props) {
                         href={applicationCvTexUrl(r.id)}
                         target="_blank"
                         rel="noreferrer"
-                        className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+                        className="mr-1 rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
                         title="Download the tailored .tex source"
                       >
                         TeX
                       </a>
                     )}
-                    {!r.has_cv_latex && !r.has_cv_pdf && (
+                    {r.has_jd && (
+                      <a
+                        href={applicationJdTxtUrl(r.id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded border border-amber-300 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 hover:bg-amber-50"
+                        title="Download the original JD as .txt — re-render later from this"
+                      >
+                        JD
+                      </a>
+                    )}
+                    {!r.has_cv_latex && !r.has_cv_pdf && !r.has_jd && (
                       <span className="text-slate-400">-</span>
                     )}
                   </td>
