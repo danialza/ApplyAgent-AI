@@ -64,33 +64,42 @@ def _llm_categorise(skills: list[str]) -> list[SkillGroup] | None:
         return None
 
     system = (
-        "Bucket a CV's technical skills into 4-8 ordered groups for the "
-        "Technical Skills section. Use these canonical labels when they "
-        "fit; invent a new label only when the candidate's skills clearly "
-        "demand it.\n\n"
+        "Bucket a CV's technical skills into ordered groups for the "
+        "Technical Skills section. Aim for 4-12 groups total.\n\n"
+        "Preferred starting labels (use when they fit naturally):\n"
         + "  " + " · ".join(CANONICAL_GROUPS) + "\n\n"
+        "You are NOT limited to these. Add a new group whenever the "
+        "candidate's skills genuinely cluster around a theme not "
+        "covered above. Good examples of custom groups recruiters "
+        "recognise: 'Mobile Development', 'Creative & Design', "
+        "'Marketing & SEO', 'Productivity Automation', 'Game Dev', "
+        "'Hardware & Embedded', 'Security', 'Testing & QA', "
+        "'Architecture & Patterns', 'Methodologies'.\n\n"
         "Hard rules:\n"
-        "1. Every input skill MUST appear in exactly one group. No "
-        "duplicates across groups, no skill dropped.\n"
-        "2. Languages contains ONLY programming languages (Python, SQL, "
-        "TypeScript, C++, Rust, etc.). Never tools like Docker or libraries.\n"
-        "3. Frameworks & Libraries contains web/app frameworks and UI "
-        "libraries (FastAPI, React, Next.js, Flask, Tailwind).\n"
-        "4. AI / ML & Data Science: PyTorch, scikit-learn, transformers, "
-        "RL, embeddings, fine-tuning, vector DBs that are AI-specific, "
-        "LLM-platform names (OpenAI, Anthropic, Claude, GPT API, RAG, "
-        "LangChain, Optuna).\n"
-        "5. Data & Storage: PostgreSQL, Redis, SQLite, S3, generic vector "
-        "databases not tied to an AI brand.\n"
-        "6. Cloud & DevOps: Docker, AWS, GCP, Azure, CI/CD, Kubernetes, "
-        "Terraform, GitHub Actions.\n"
-        "7. Tools & Platforms: Git, Linux, Ubuntu, Notion, Zapier, Make, "
-        "Airtable, Adobe Photoshop, n8n. Anything a non-engineer might "
-        "use on adjacent workflow.\n"
-        "8. Drop a group entirely if it has zero items. Don't pad.\n\n"
+        "1. Every input skill SHOULD appear in exactly one group when "
+        "a coherent group exists. If a skill is truly ambiguous and "
+        "doesn't fit any group cleanly (yours or canonical), DROP it "
+        "rather than dumping it into a generic 'Other' bucket.\n"
+        "2. Never emit a group literally labelled 'Other' or "
+        "'Miscellaneous' — invent a better name or omit the skill.\n"
+        "3. Languages contains ONLY programming languages (Python, "
+        "SQL, TypeScript, C++, Rust, etc.). Never tools/libraries.\n"
+        "4. Frameworks & Libraries: web/app frameworks and UI libs "
+        "(FastAPI, React, Next.js, Flask, Tailwind, jQuery).\n"
+        "5. AI / ML & Data Science: PyTorch, scikit-learn, transformers, "
+        "RL, embeddings, fine-tuning, LLM-platform names (OpenAI, "
+        "Anthropic, Claude, GPT API, RAG, LangChain, Optuna).\n"
+        "6. Data & Storage: PostgreSQL, Redis, SQLite, S3, generic "
+        "vector databases not tied to an AI brand.\n"
+        "7. Cloud & DevOps: Docker, AWS, GCP, Azure, CI/CD, "
+        "Kubernetes, Terraform, GitHub Actions.\n"
+        "8. Group order matters — most technically-impressive groups "
+        "first (Languages, Frameworks, AI/ML), then infra/tools, then "
+        "domain/soft groups at the end.\n"
+        "9. Drop an empty group entirely. Don't pad.\n\n"
         "Reply with one JSON object:\n"
         '  {"groups": [{"label": "Languages", "items": ["Python", "SQL"]}, '
-        '{"label": "Frameworks & Libraries", "items": [...]}, ...]}'
+        '{"label": "Mobile Development", "items": ["iOS Development", "Android Development"]}, ...]}'
     )
     user = json.dumps({"skills": skills}, ensure_ascii=False)
 
@@ -135,32 +144,49 @@ def _llm_categorise(skills: list[str]) -> list[SkillGroup] | None:
         if clean:
             out.append(SkillGroup(label=label, items=clean))
 
-    # ---- Backfill anything the LLM dropped.
+    # ---- Backfill anything the LLM dropped — but ONLY via the
+    # deterministic categorizer's CANONICAL labels. Anything the
+    # fallback would have labelled "Other" we drop on the floor:
+    # user wants ungroupable skills hidden rather than dumped into a
+    # noisy catch-all.
     dropped = [s for s in skills if s.lower() not in surviving]
     if dropped:
-        logger.info("Skill categorizer backfilling %d dropped items", len(dropped))
-        # Try to slot them via the deterministic categorizer rather
-        # than dumping into "Other" so the labels stay coherent.
         backfill = _fallback_categorise(dropped)
-        # Merge backfill into existing groups by label, else append.
         by_label = {g.label.lower(): g for g in out}
+        kept, discarded = 0, 0
         for g in backfill:
+            if g.label.lower() == "other":
+                # Skip — user prefers losing the skill over polluting groups.
+                discarded += len(g.items)
+                continue
             existing = by_label.get(g.label.lower())
             if existing:
                 existing.items.extend(g.items)
             else:
                 out.append(g)
+            kept += len(g.items)
+        logger.info(
+            "Skill categorizer backfill: kept=%d discarded=%d (ungroupable)",
+            kept, discarded,
+        )
 
-    # ---- Re-order: canonical groups first, custom labels after.
-    out.sort(key=lambda g: _order_index(g.label))
-    return out
+    # ---- Re-order: canonical groups in their canonical order; custom
+    # labels preserve the LLM-returned order so the model's judgment
+    # about what comes first (most impressive) survives.
+    canon_lookup = {c.lower(): i for i, c in enumerate(CANONICAL_GROUPS)}
+    enumerated = list(enumerate(out))
 
+    def _key(item):
+        idx, g = item
+        canon_idx = canon_lookup.get(g.label.lower())
+        if canon_idx is not None:
+            # Canonical group: sort by canonical index, position tiebreak.
+            return (0, canon_idx, idx)
+        # Custom group: sort to the end, preserve LLM-returned order.
+        return (1, idx, idx)
 
-def _order_index(label: str) -> int:
-    for i, canon in enumerate(CANONICAL_GROUPS):
-        if label.lower() == canon.lower():
-            return i
-    return len(CANONICAL_GROUPS) + 1  # custom labels last
+    enumerated.sort(key=_key)
+    return [g for _, g in enumerated]
 
 
 # ---------- Deterministic fallback (fixed-order checks) ----------
