@@ -156,7 +156,27 @@ def delete_cv(cv_id: int, db: Session = Depends(get_db)) -> None:
         store.remove_cv(cv_id)
         store.save()
 
-    # NOTE: we deliberately don't re-aggregate the library after a delete.
-    # PDF parsing is lossy, and a markdown-built library is the source of
-    # truth. To force a re-aggregation, the user explicitly calls
-    # POST /api/cv/library/rebuild.
+    # Unified-uploader contract: every source mutation rebuilds the
+    # master library. Deleting a CV must drop its contributions from
+    # selected_projects / experience / education etc. Failure logged
+    # not raised so a delete still succeeds when the rebuild trips.
+    try:
+        from datetime import datetime as _dt
+        from app.models.db_models import CVLibrary
+        from app.services.cv_library_builder import build_library_from_all
+
+        payload = build_library_from_all(db).model_dump()
+        row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+        if row is None:
+            row = CVLibrary(id=1)
+            db.add(row)
+        for k, v in payload.items():
+            setattr(row, k, v)
+        row.updated_at = _dt.utcnow()
+        db.commit()
+    except Exception as exc:  # pragma: no cover
+        db.rollback()
+        import logging as _log
+        _log.getLogger("ai_job_cv_matcher.cv").warning(
+            "CV library auto-rebuild after delete failed: %s", exc,
+        )
