@@ -94,6 +94,25 @@ def get_template() -> dict:
     )
 
 
+@router.get("/library/issues")
+def library_issues(db: Session = Depends(get_db)) -> dict:
+    """Audit the master library for parse garbage, near-dupes, and
+    cross-source conflicts. Combines deterministic checks with an
+    optional LLM pass that spots harder problems (timeline gaps,
+    unsupported summary claims). Used by the UI to show a warning
+    banner before the user renders a tailored CV from a bad master.
+    """
+    from app.services.library_quality import audit
+
+    row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is None:
+        return {"issues": [], "counts": {"total": 0}, "llm_used": False,
+                "error": "No library yet."}
+    library_out = _to_out(row)
+    result = audit(library_out, use_llm=True)
+    return result.model_dump()
+
+
 @router.delete("/library", status_code=status.HTTP_204_NO_CONTENT)
 def delete_library(db: Session = Depends(get_db)) -> None:
     """Drop the singleton library row. Useful when PDF auto-build

@@ -287,6 +287,15 @@ export function applicationJdTxtUrl(id: number): string {
   return `${API_BASE}/api/applications/${id}/jd.txt`;
 }
 
+export async function fetchLibraryIssues(): Promise<{
+  issues: { severity: "error" | "warning" | "info"; scope: string; title: string; detail: string; fix_hint: string }[];
+  counts: { error?: number; warning?: number; info?: number; total: number };
+  llm_used: boolean;
+}> {
+  const res = await fetch(`${API_BASE}/api/cv/library/issues`, { cache: "no-store" });
+  return handle(res);
+}
+
 // ---------- Unified sources ----------
 
 import type { UnifiedSource, WebSourceOut } from "./types";

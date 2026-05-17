@@ -576,19 +576,39 @@ def render_cv(
 
     def render_education(entries):
         out = []
+        seen_inst: set[str] = set()
         for e in entries:
-            # Drop rows with no institution AND no degree — corrupt
-            # auto-seed artifacts from messy PDF extraction.
             inst = (e.institution or "").strip()
             deg = (e.degree or "").strip()
             if not inst and not deg:
                 continue
+            # CV-parse bug: the whole row gets stuffed into institution
+            # ("MSc in AI & Robotics, University of Hertfordshire, …,
+            # Distinction, GPA: 4.42/5.00"). Recover by splitting on
+            # the FIRST comma: left half is the degree, right half is
+            # the institution. Anything after the institution gets
+            # discarded as parser overflow.
+            if (not deg) and "," in inst and len(inst) > 50:
+                parts = [p.strip() for p in inst.split(",")]
+                # Heuristic: the degree usually starts with "MSc",
+                # "BSc", "PhD", "BA", "MA"; institution starts with
+                # "University", "Institute", "College".
+                degree_re = re.compile(r"^(MSc|BSc|PhD|BA|MA|MEng|BEng)\b", re.IGNORECASE)
+                inst_re = re.compile(r"^(University|Institute|College|School|Académie)\b", re.IGNORECASE)
+                deg_piece = next((p for p in parts if degree_re.match(p)), parts[0])
+                inst_piece = next((p for p in parts if inst_re.match(p)), parts[1] if len(parts) > 1 else "")
+                deg, inst = deg_piece, inst_piece
             # Drop rows where the "degree" field has eaten a sentence
-            # fragment (parser glued unrelated text into degree). Cap
-            # length at 180 chars and require it not look like a
-            # full bullet (no period mid-string before a capital).
+            # fragment (parser glued unrelated text into degree).
             if len(deg) > 180 or re.search(r"\.\s+[A-Z]", deg):
                 deg = ""
+            # Dedup by institution: keep first occurrence so two
+            # corrupt source rows for the same school collapse to one.
+            inst_key = inst.lower()
+            if inst_key in seen_inst:
+                continue
+            if inst_key:
+                seen_inst.add(inst_key)
             out.append({
                 "institution": inst,
                 "degree": deg,

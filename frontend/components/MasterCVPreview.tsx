@@ -1,8 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchCVLibrary } from "@/lib/api";
+import { fetchCVLibrary, fetchLibraryIssues } from "@/lib/api";
 import type { CVLibrary } from "@/lib/types";
+
+interface LibraryIssue {
+  severity: "error" | "warning" | "info";
+  scope: string;
+  title: string;
+  detail: string;
+  fix_hint: string;
+}
 
 interface Props {
   /** Bumped from the parent (UnifiedSourcePanel) whenever a source
@@ -25,6 +33,8 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
   const [lib, setLib] = useState<CVLibrary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [issues, setIssues] = useState<LibraryIssue[]>([]);
+  const [issuesLLM, setIssuesLLM] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,6 +52,15 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    // Audit in parallel; cheap deterministic + one LLM call.
+    fetchLibraryIssues()
+      .then((r) => {
+        if (!cancelled) {
+          setIssues(r.issues || []);
+          setIssuesLLM(!!r.llm_used);
+        }
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -65,8 +84,58 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
     );
   }
 
+  const errorCount = issues.filter((i) => i.severity === "error").length;
+  const warnCount = issues.filter((i) => i.severity === "warning").length;
+
   return (
     <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-3">
+      {/* Quality audit banner — errors red, warnings amber, info slate.
+          Click each row to expand its detail + fix hint. */}
+      {issues.length > 0 && (
+        <details
+          className={
+            "rounded-lg border p-2 text-xs " +
+            (errorCount > 0
+              ? "border-rose-300 bg-rose-50 text-rose-900"
+              : warnCount > 0
+              ? "border-amber-300 bg-amber-50 text-amber-900"
+              : "border-slate-200 bg-slate-50 text-slate-700")
+          }
+          open={errorCount > 0}
+        >
+          <summary className="cursor-pointer font-semibold">
+            ⚠ Master CV audit · {errorCount} errors · {warnCount} warnings ·{" "}
+            {issues.length - errorCount - warnCount} info
+            {issuesLLM && <span className="ml-2 text-[10px] font-normal opacity-70">(includes LLM analysis)</span>}
+          </summary>
+          <ul className="mt-2 space-y-1">
+            {issues.map((iss, i) => {
+              const dot =
+                iss.severity === "error" ? "●" : iss.severity === "warning" ? "▲" : "•";
+              const cls =
+                iss.severity === "error"
+                  ? "text-rose-700"
+                  : iss.severity === "warning"
+                  ? "text-amber-700"
+                  : "text-slate-600";
+              return (
+                <li key={i} className="rounded border border-slate-200 bg-white/60 px-2 py-1">
+                  <p className={`font-semibold ${cls}`}>
+                    {dot} [{iss.scope}] {iss.title}
+                  </p>
+                  {iss.detail && (
+                    <p className="text-slate-600">{iss.detail}</p>
+                  )}
+                  {iss.fix_hint && (
+                    <p className="italic text-slate-500">↳ {iss.fix_hint}</p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </details>
+      )}
+
       {/* Header */}
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
