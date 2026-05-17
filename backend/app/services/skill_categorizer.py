@@ -122,12 +122,28 @@ def _llm_categorise(skills: list[str]) -> list[SkillGroup] | None:
         return None
 
     # ---- Validate: every input skill survives, no duplicates.
+    # HARD reject any group labelled "Other" / "Miscellaneous" — the
+    # prompt forbids them but the model sometimes ignores. Items
+    # inside get dropped (not pooled elsewhere) per user spec.
     surviving: set[str] = set()
     out: list[SkillGroup] = []
+    BANNED_LABELS = {"other", "miscellaneous", "misc", "general", ""}
     for g in raw_groups:
         if not isinstance(g, dict):
             continue
-        label = (g.get("label") or "").strip() or "Other"
+        label = (g.get("label") or "").strip()
+        if label.lower() in BANNED_LABELS:
+            logger.info(
+                "Skill categorizer dropped banned group %r with %d items",
+                label, len(g.get("items") or []),
+            )
+            # Still mark these items as "surviving" so the backfill
+            # doesn't try to put them back in via the deterministic
+            # path — user wants them gone, not relocated.
+            for it in (g.get("items") or []):
+                if isinstance(it, str) and it.strip():
+                    surviving.add(it.strip().lower())
+            continue
         items_in = g.get("items") or []
         if not isinstance(items_in, list):
             continue
