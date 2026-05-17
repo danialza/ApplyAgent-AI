@@ -41,7 +41,9 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
   // below are -1 by default, meaning "follow whatever the planner
   // picked". Power users can flip the Advanced disclosure to pin
   // exact numbers.
-  const [targetLength, setTargetLength] = useState<"auto" | "one_page" | "two_page">("auto");
+  const [targetLength, setTargetLength] = useState<
+    "auto" | "one_page" | "one_half_page" | "two_page"
+  >("auto");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [maxSelected, setMaxSelected] = useState(-1);
   const [maxAdditional, setMaxAdditional] = useState(-1);
@@ -534,6 +536,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
           <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-semibold shadow-sm">
             {([
               ["one_page", "1 page"],
+              ["one_half_page", "1.5 pages"],
               ["two_page", "2 pages"],
               ["auto", "Auto (LLM)"],
             ] as const).map(([val, lbl]) => (
@@ -551,8 +554,10 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
                   val === "auto"
                     ? "LLM picks caps from JD seniority + your library. Falls back to 2 pages if LLM is off."
                     : val === "one_page"
-                    ? "Junior / early-career preset: 2 selected · 1 additional · 2 experience"
-                    : "Senior / mid preset: 5 selected · 3 additional · 4 experience"
+                    ? "Junior / early-career: 2 selected · 1 additional · 2 experience"
+                    : val === "one_half_page"
+                    ? "Mid-level tight: 3 selected · 1 additional · 2 experience"
+                    : "Senior / mid: 4 selected · 2 additional · 3 experience"
                 }
               >
                 {lbl}

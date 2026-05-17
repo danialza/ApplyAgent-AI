@@ -511,7 +511,7 @@ class RenderCVRequest(BaseModel):
     # density and falls back to "two_page" when LLM is off. The raw
     # max_* fields below still work and OVERRIDE the picker — leave
     # them at their defaults to follow the picker.
-    target_length: Literal["auto", "one_page", "two_page"] = "auto"
+    target_length: Literal["auto", "one_page", "one_half_page", "two_page"] = "auto"
     # Caps applied per section after JD-relevance ranking. -1 = "use
     # whatever the planner picks". Explicit non-negative values override.
     max_selected_projects: int = Field(default=-1, ge=-1, le=20)

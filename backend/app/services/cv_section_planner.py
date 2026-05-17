@@ -26,7 +26,7 @@ from app.models.schemas import CVLibraryOut, JobParsed
 
 logger = logging.getLogger("ai_job_cv_matcher.planner")
 
-TargetLength = Literal["auto", "one_page", "two_page"]
+TargetLength = Literal["auto", "one_page", "one_half_page", "two_page"]
 
 
 @dataclass
@@ -48,6 +48,17 @@ _PRESETS: dict[str, SectionPlan] = {
         max_experience=2,
         source="one_page",
         rationale="One-page preset (junior / early-career).",
+    ),
+    "one_half_page": SectionPlan(
+        # Midway between one and two pages. Fits 3 strong projects +
+        # 1 honourable mention + full experience. Good fit for
+        # mid-level applications where 1 page feels thin but 2 risks
+        # filler.
+        max_selected_projects=3,
+        max_additional_projects=1,
+        max_experience=2,
+        source="one_half_page",
+        rationale="One-and-a-half-page preset (mid-level, tight).",
     ),
     "two_page": SectionPlan(
         # Tightened from 5/3/4 → 4/2/3 so only top-tier work survives.
@@ -86,11 +97,11 @@ def plan_sections(
     """
     # Start from the preset. ``auto`` falls back to ``two_page`` when
     # the LLM is unavailable.
-    if target_length == "one_page":
-        base = _PRESETS["one_page"]
-    elif target_length == "two_page":
-        base = _PRESETS["two_page"]
+    if target_length in _PRESETS:
+        base = _PRESETS[target_length]
     else:
+        # "auto" path — or any unknown future literal — defers to LLM
+        # and falls back to two_page when LLM unreachable.
         base = _llm_plan(library, job) or SectionPlan(
             **{k: v for k, v in vars(_PRESETS["two_page"]).items()
                if k != "rationale" and k != "source"},

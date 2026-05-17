@@ -399,7 +399,7 @@ export interface RenderCVRequest {
   /** 1..5 — items in `core_competencies` below this rating stay hidden. */
   min_competency_rating?: number;
   /** Page-target picker. "auto" asks the LLM to choose caps. */
-  target_length?: "auto" | "one_page" | "two_page";
+  target_length?: "auto" | "one_page" | "one_half_page" | "two_page";
   /** 0..1. If coverage < target, LLM rewrites bullets to weave in missing keywords. */
   target_keyword_coverage?: number;
   /** Max boost rounds. 0 disables. */
