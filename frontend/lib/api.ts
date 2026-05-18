@@ -199,6 +199,19 @@ export async function fetchLLMStatus(): Promise<LLMStatus> {
   return handle<LLMStatus>(res);
 }
 
+/** Switch the live LLM provider without restarting the backend.
+ *  Persists only for the lifetime of this backend process. */
+export async function setLLMProvider(
+  provider: "claude_code" | "anthropic" | "openai"
+): Promise<LLMStatus> {
+  const res = await fetch(`${API_BASE}/api/cv/llm-provider`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider }),
+  });
+  return handle<LLMStatus>(res);
+}
+
 export async function putCVLibrary(payload: Omit<CVLibrary, "id" | "updated_at">): Promise<CVLibrary> {
   const res = await fetch(`${API_BASE}/api/cv/library`, {
     method: "PUT",

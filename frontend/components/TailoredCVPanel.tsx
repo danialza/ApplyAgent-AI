@@ -134,6 +134,18 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
     }
   }
 
+  async function switchLLMProvider(p: "claude_code" | "anthropic" | "openai") {
+    setLlmChecking(true);
+    try {
+      const { setLLMProvider } = await import("@/lib/api");
+      setLlmStatus(await setLLMProvider(p));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Switch failed.");
+    } finally {
+      setLlmChecking(false);
+    }
+  }
+
   async function handleDownloadTemplate() {
     try {
       const { filename, content } = await fetchCVTemplate();
@@ -326,6 +338,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
         status={llmStatus}
         checking={llmChecking}
         onRecheck={refreshLLMStatus}
+        onSwitch={switchLLMProvider}
       />
 
       {/* Library status header */}
@@ -764,10 +777,12 @@ function LLMStatusBanner({
   status,
   checking,
   onRecheck,
+  onSwitch,
 }: {
   status: LLMStatus | null;
   checking: boolean;
   onRecheck: () => void;
+  onSwitch: (p: "claude_code" | "anthropic" | "openai") => void;
 }) {
   let tone = "slate";
   let label = "LLM status: checking…";
@@ -800,14 +815,31 @@ function LLMStatusBanner({
         <p className="font-medium">{label}</p>
         <p className="text-[11px] opacity-80">{detail}</p>
       </div>
-      <button
-        type="button"
-        onClick={onRecheck}
-        disabled={checking}
-        className="rounded-md border border-current/30 bg-white px-2.5 py-1 text-xs font-medium hover:bg-white/80 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {checking ? "Checking…" : "Re-check"}
-      </button>
+      <div className="flex items-center gap-1.5">
+        {/* Provider switcher — claude_code uses your Pro sub (free
+            quota), anthropic / openai use API credits. */}
+        <select
+          value={status?.provider || ""}
+          onChange={(e) =>
+            onSwitch(e.target.value as "claude_code" | "anthropic" | "openai")
+          }
+          disabled={checking}
+          className="rounded-md border border-current/30 bg-white px-1.5 py-1 text-xs font-medium disabled:opacity-50"
+          title="Switch provider live. claude_code = Pro plan (free quota). anthropic/openai = pay-per-token API."
+        >
+          <option value="claude_code">Claude SDK (Pro)</option>
+          <option value="anthropic">Anthropic API</option>
+          <option value="openai">OpenAI API</option>
+        </select>
+        <button
+          type="button"
+          onClick={onRecheck}
+          disabled={checking}
+          className="rounded-md border border-current/30 bg-white px-2.5 py-1 text-xs font-medium hover:bg-white/80 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {checking ? "Checking…" : "Re-check"}
+        </button>
+      </div>
     </div>
   );
 }

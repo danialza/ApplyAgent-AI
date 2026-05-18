@@ -212,6 +212,28 @@ def delete_library(db: Session = Depends(get_db)) -> None:
     db.commit()
 
 
+@router.post("/llm-provider")
+def set_llm_provider(payload: dict) -> dict:
+    """Switch the active LLM provider at runtime.
+
+    Body: ``{"provider": "claude_code" | "anthropic" | "openai"}``.
+    Sets os.environ['LLM_PROVIDER'] in-process so the next call to
+    `_detect_provider()` picks it up. No container restart needed.
+
+    Note: only persists for the lifetime of this process. Restart →
+    reverts to whatever the .env / compose file specifies.
+    """
+    import os as _os
+    provider = (payload or {}).get("provider", "").strip().lower()
+    if provider not in {"claude_code", "anthropic", "openai"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"provider must be one of: claude_code, anthropic, openai (got {provider!r}).",
+        )
+    _os.environ["LLM_PROVIDER"] = provider
+    return llm_status()
+
+
 @router.get("/llm-status")
 def llm_status() -> dict:
     """Quick diagnostic — is the LLM polish layer reachable?
