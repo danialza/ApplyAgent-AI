@@ -558,6 +558,30 @@ def render_cv(
     jd_terms = _jd_terms(job)
     jd_groups = {group_key(t) for t in jd_terms if t}
     bold_terms = _bold_terms(jd_terms)
+
+    # Dynamic synonym expansion — LLM looks at THIS JD and returns
+    # canonical-to-alias maps the static synonyms.py doesn't carry
+    # (e.g. "alpha generation" → ["factor models", "Fama-French"]).
+    # Unions into jd_groups so the project ranker scores domain-fit
+    # without us hand-curating finance / legal / web / etc. packs.
+    # Result cached per JD hash so re-renders are free.
+    if job and (job.raw_text or "").strip():
+        try:
+            from app.services.jd_synonym_expander import expanded_jd_keys
+            extra = expanded_jd_keys(job.raw_text)
+            for k in extra:
+                jd_groups.add(group_key(k))
+            # Also include the expanded terms in bold_terms so the JD's
+            # own multi-word phrases get bolded inside bullets.
+            bold_terms = sorted(
+                set(bold_terms) | extra,
+                key=len, reverse=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            import logging as _log
+            _log.getLogger("ai_job_cv_matcher.renderer").warning(
+                "JD synonym expansion failed: %s", exc,
+            )
     # NOTE: deliberately NOT unioning library skills into bold_terms
     # — that produced wall-of-bold output (every Python / Docker /
     # FastAPI mention wrapped). Reference CVs bold ~5-10 high-signal
