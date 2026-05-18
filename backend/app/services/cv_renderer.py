@@ -183,18 +183,41 @@ def _bold_terms(jd_canonicals: list[str]) -> list[str]:
     return sorted(expanded, key=len, reverse=True)
 
 
-def _entry_score(entry_terms: Iterable[str], jd_groups: set[str]) -> int:
-    """How many JD synonym groups this entry's tags / text covers."""
+# Tokens so common they shouldn't dominate ranking. A project tagged
+# "Python" matches almost any JD; without a penalty, an LLM-app project
+# tied on Python would outrank a domain-specific project tied on
+# "Reinforcement Learning". Generic = 0.3 weight, specific = 1.0,
+# multi-word = 3.0 (these signal real domain fit: "vision-language-action",
+# "behaviour cloning", etc.).
+_GENERIC_TAG_GROUPS: set[str] = {
+    "python", "sql", "javascript", "typescript", "java", "git", "docker",
+    "api", "apis", "rest api", "rest apis", "ai", "ml", "linux", "ubuntu",
+}
+
+
+def _entry_score(entry_terms: Iterable[str], jd_groups: set[str]) -> float:
+    """Weighted overlap score. Multi-word JD terms count 3x, generic
+    single tokens (Python, Git, Docker) count 0.3x, everything else 1x.
+    Returns float so the ranker can break ties more cleanly than the
+    old integer count."""
     if not jd_groups:
-        return 0
+        return 0.0
     hits: set[str] = set()
+    score = 0.0
     for t in entry_terms:
         if not t:
             continue
         gk = group_key(t)
-        if gk in jd_groups:
-            hits.add(gk)
-    return len(hits)
+        if not gk or gk not in jd_groups or gk in hits:
+            continue
+        hits.add(gk)
+        if " " in gk:
+            score += 3.0           # specific multi-word match
+        elif gk in _GENERIC_TAG_GROUPS:
+            score += 0.3           # generic token — weak signal
+        else:
+            score += 1.0           # specific single-word
+    return score
 
 
 def _rank_entries(
@@ -224,10 +247,13 @@ def _rank_entries(
         for idx, item in enumerate(items)
     ]
     if drop_zero:
-        positive = [(s, i, x) for s, i, x in decorated if s > 0]
-        # But never return an empty list — recruiters reading a CV with
-        # zero projects is worse than recruiters reading off-target ones.
-        # Keep the highest-scoring (or first) entry when all score 0.
+        # Threshold = 1.0. A project matching only generic tokens
+        # (Python, Git, Docker @ 0.3 each) won't clear this unless it
+        # has 4+ generic matches. Specific single-word or any
+        # multi-word match clears immediately.
+        positive = [(s, i, x) for s, i, x in decorated if s >= 1.0]
+        # Never return empty — keep the best-scoring entry when no
+        # project meets the threshold.
         if positive:
             decorated = positive
         else:

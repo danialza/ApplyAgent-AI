@@ -88,14 +88,30 @@ TAILOR THIS CV TO THIS JOB. Run the 7-step career-ops pipeline exactly:
   STEP 1 — Extract 15-20 canonical keywords from the JD (skill nouns +
            role terms). Use exact form (e.g. "Reinforcement Learning",
            not "RL paraphrase").
-  STEP 2 — Detect archetype: Applied AI Engineer / RL Researcher /
-           MLOps / RAG Engineer / NLP Engineer / Robotics / Full-stack
-           AI / Backend AI / Data Engineer. Open the Summary with the
-           candidate's strongest credential for that archetype.
+  STEP 2 — Detect archetype from JD keyword density. Common archetypes:
+           Robot Learning Engineer (RL + manipulation + sim-to-real +
+           VLA/diffusion + MuJoCo/Isaac)
+           Applied AI Engineer (LLM apps + RAG + agents + backend)
+           ML Research Engineer (publications + neural architectures +
+           PyTorch + distributed training)
+           MLOps Engineer (deployment + monitoring + pipelines + scale)
+           Robotics Software Engineer (ROS + perception + real-hardware
+           + control)
+           Backend AI Engineer (FastAPI + LLM APIs + vector DBs)
+           Data Engineer (pipelines + ETL + warehouses)
+           NLP Engineer (transformers + tokenisation + LLM training)
+           Full-stack AI (frontend + backend + ML)
+
+           HARD: Open the Summary line with the EXACT archetype noun
+           phrase from the JD's vocabulary. If JD title is "Senior
+           Robot Learning Engineer", Summary MUST start with "Robot
+           learning engineer" / "Senior robot learning engineer", NOT
+           "Applied AI engineer" or "Software engineer". Misidentifying
+           the archetype is the #1 reason recruiters skip a CV.
   STEP 3 — Rewrite the Professional Summary in 3-4 lines, NO first-
-           person pronouns. Thread in the top 5 JD keywords by
-           paraphrasing existing library claims. End with what the
-           candidate ships / builds / improves.
+           person pronouns. After the archetype opener, thread in the
+           top 5 JD keywords by paraphrasing existing library claims.
+           End with what the candidate ships / builds / improves.
   STEP 4 — For each project in selected_projects + additional_projects:
            KEEP THE SAME NUMBER OF BULLETS as the library (so the
            template renders cleanly). Reorder JD-relevant bullets to
