@@ -58,9 +58,12 @@ services:
       - ./docs:/app/docs:ro
       # Claude Code SDK auth — when LLM_PROVIDER=claude_code, the
       # backend shells out to the `claude` CLI which reads the host
-      # user's logged-in Pro session from ~/.claude. Optional; only
-      # needed if you want to bypass API billing using your Pro plan.
+      # user's logged-in Pro session. CLI looks at TWO host paths:
+      #   ~/.claude/        (folder: backups, cache, history)
+      #   ~/.claude.json    (single file: account + session token)
+      # Both must be mounted or CLI errors with "config not found".
       - ${HOME}/.claude:/home/app/.claude:ro
+      - ${HOME}/.claude.json:/home/app/.claude.json:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
       interval: 30s
