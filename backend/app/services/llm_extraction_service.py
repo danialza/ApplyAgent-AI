@@ -349,9 +349,26 @@ def _chat_completion_claude_code(
         )
     full_prompt = "\n\n".join(prompt_blocks)
 
+    # Claude Code CLI accepts short aliases (sonnet/opus/haiku), NOT
+    # the API model identifiers like 'claude-sonnet-4-5'. Map by
+    # substring; fallback = let CLI pick its default.
+    model_raw = (cfg.get("model") or "").lower()
+    if "opus" in model_raw:
+        cli_model = "opus"
+    elif "haiku" in model_raw:
+        cli_model = "haiku"
+    elif "sonnet" in model_raw:
+        cli_model = "sonnet"
+    else:
+        cli_model = ""
+
+    cmd = ["claude", "--print"]
+    if cli_model:
+        cmd += ["--model", cli_model]
+
     try:
         proc = subprocess.run(
-            ["claude", "--print", "--model", cfg["model"]],
+            cmd,
             input=full_prompt,
             capture_output=True,
             text=True,
