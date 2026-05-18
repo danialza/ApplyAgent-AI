@@ -17,7 +17,15 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         curl libgomp1 build-essential \
         ca-certificates libfontconfig1 \
+        nodejs npm \
     && rm -rf /var/lib/apt/lists/*
+
+# Claude Code CLI — lets the backend talk to Claude through the
+# user's Pro subscription auth (no API credit deduction). Activated
+# by LLM_PROVIDER=claude_code. Requires ~/.claude volume mount at
+# runtime so the container reads the host's logged-in session.
+RUN npm install -g @anthropic-ai/claude-code \
+    && claude --version || true
 
 # Tectonic: a single-binary LaTeX compiler used by the tailored-CV
 # renderer (POST /api/cv/render with compile_pdf=true). ~30 MB; pulls

@@ -179,7 +179,7 @@ def _detect_provider() -> str:
       3. Default to openai if both keys are set (or neither — caller checks).
     """
     explicit = (os.getenv("LLM_PROVIDER") or "").strip().lower()
-    if explicit in {"openai", "anthropic"}:
+    if explicit in {"openai", "anthropic", "claude_code"}:
         return explicit
     has_oa = bool(os.getenv("OPENAI_API_KEY"))
     has_an = bool(os.getenv("ANTHROPIC_API_KEY"))
@@ -189,18 +189,36 @@ def _detect_provider() -> str:
 
 
 def is_enabled() -> bool:
-    """True iff `USE_LLM_EXTRACTION` is truthy AND an API key is present
-    for the active provider."""
+    """True iff `USE_LLM_EXTRACTION` is truthy AND the active provider
+    is reachable (API key present, or for claude_code, the CLI binary
+    is installed)."""
     if not _truthy(os.getenv("USE_LLM_EXTRACTION")):
         return False
     provider = _detect_provider()
     if provider == "anthropic":
         return bool(os.getenv("ANTHROPIC_API_KEY"))
+    if provider == "claude_code":
+        # CLI presence is the proxy for "Pro session auth available".
+        # Auth itself is checked lazily on first call.
+        import shutil
+        return shutil.which("claude") is not None
     return bool(os.getenv("OPENAI_API_KEY"))
 
 
 def _config() -> dict[str, Any]:
     provider = _detect_provider()
+    if provider == "claude_code":
+        return {
+            "provider": "claude_code",
+            "api_key": "",  # uses Pro subscription auth via CLI
+            "base_url": "claude-cli://",
+            "model": (
+                os.getenv("ANTHROPIC_MODEL")
+                or os.getenv("LLM_MODEL_NAME")
+                or DEFAULT_ANTHROPIC_MODEL
+            ),
+            "timeout": float(os.getenv("LLM_TIMEOUT_SECONDS") or DEFAULT_TIMEOUT),
+        }
     if provider == "anthropic":
         return {
             "provider": "anthropic",
@@ -241,6 +259,8 @@ def _chat_completion(messages: list[dict[str, str]], *, json_mode: bool = True) 
     Raises with the upstream error body on any non-2xx.
     """
     cfg = _config()
+    if cfg["provider"] == "claude_code":
+        return _chat_completion_claude_code(messages, cfg, json_mode=json_mode)
     if cfg["provider"] == "anthropic":
         return _chat_completion_anthropic(messages, cfg, json_mode=json_mode)
     return _chat_completion_openai(messages, cfg, json_mode=json_mode)
@@ -287,6 +307,70 @@ def _chat_completion_openai(
             )
         data = resp.json()
     return data["choices"][0]["message"]["content"]
+
+
+def _chat_completion_claude_code(
+    messages: list[dict[str, str]],
+    cfg: dict[str, Any],
+    *,
+    json_mode: bool = True,
+) -> str:
+    """Run a one-shot Claude completion via the `claude` CLI using the
+    host's Pro subscription auth (no API credit deduction).
+
+    Requires:
+      * `claude` binary on PATH (installed in Dockerfile).
+      * Volume mount of host's `~/.claude` into the container so the
+        CLI reads the user's logged-in session.
+
+    JSON mode is enforced via prompt instruction (the CLI has no
+    response_format flag). Caller's `_coerce_json` handles fence
+    stripping in the response.
+    """
+    import subprocess
+
+    # Concat messages into one prompt — claude CLI takes plain text on
+    # stdin. System message first (no role marker; CLI treats input as
+    # the user turn), then user content. Multi-turn collapsed to a
+    # single combined message since these are one-shot extractions.
+    system_parts = [m["content"] for m in messages if m.get("role") == "system"]
+    user_parts = [m["content"] for m in messages if m.get("role") == "user"]
+    if not user_parts:
+        raise RuntimeError("claude_code call needs at least one user message.")
+
+    prompt_blocks: list[str] = []
+    if system_parts:
+        prompt_blocks.append("SYSTEM:\n" + "\n\n".join(system_parts))
+    prompt_blocks.append("USER:\n" + "\n\n".join(user_parts))
+    if json_mode:
+        prompt_blocks.append(
+            "Respond with valid JSON only. No markdown fences, no prose, "
+            "no comments. First character `{`, last character `}`."
+        )
+    full_prompt = "\n\n".join(prompt_blocks)
+
+    try:
+        proc = subprocess.run(
+            ["claude", "--print", "--model", cfg["model"]],
+            input=full_prompt,
+            capture_output=True,
+            text=True,
+            timeout=cfg["timeout"],
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "claude CLI not found. Install @anthropic-ai/claude-code "
+            "in the container."
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"claude CLI timed out after {cfg['timeout']}s."
+        ) from exc
+
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()[:300]
+        raise RuntimeError(f"claude CLI returned {proc.returncode}: {err}")
+    return (proc.stdout or "").strip()
 
 
 def _chat_completion_anthropic(
