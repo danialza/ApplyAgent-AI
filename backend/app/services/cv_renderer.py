@@ -288,7 +288,10 @@ _LATEX_TEMPLATE = r"""
     \usepackage{lmodern}
 \fi
 
-\usepackage{charter}
+% XCharter — modern Charter with proper weight axes. Bold renders
+% visibly heavier than legacy `charter` package (which user said
+% looked flat). Fallback to charter is automatic via TeX Live.
+\usepackage{XCharter}
 
 \pagestyle{empty}
 \setcounter{secnumdepth}{0}
