@@ -79,7 +79,16 @@ _SYSTEM = (
     "violates this rule. "
     "(6) Bullets that don't relate to the JD should be REWRITTEN "
     "MINIMALLY — closer to the original library text — not rewritten "
-    "with generic AI-engineer vocabulary."
+    "with generic AI-engineer vocabulary. "
+    "(7) WRITE NATURAL PROSE. Avoid hyphen-chain modifiers that sound "
+    "mechanical: 'CLIP-style encoders' → 'CLIP encoders' or "
+    "'encoders like CLIP'; 'PaliGemma-inspired VLM extraction' → "
+    "'VLM extraction using PaliGemma'; 'RAG-style pipelines' → "
+    "'RAG pipelines'. Hyphenated compounds are fine when they're the "
+    "actual term ('sim-to-real', 'real-hardware', 'multi-GPU'), but "
+    "don't invent '-style', '-inspired', '-aware', '-friendly', "
+    "'-oriented' modifiers to sound technical. Recruiters skim — "
+    "natural sentences read faster than dash-glued chains."
 )
 
 _USER_TEMPLATE = """\

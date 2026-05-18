@@ -95,10 +95,17 @@ def _bold_matches(text: str, terms: list[str]) -> str:
         escaped_term = latex_escape(term)
         if not escaped_term:
             continue
+        # Hyphen-attached suffixes (style, inspired, based, aware,
+        # friendly, etc.) get pulled into the bold so "CLIP-style"
+        # and "PaliGemma-inspired" bold as one unit instead of cutting
+        # at the dash. The (?:-[A-Za-z]+)* is greedy so multi-hyphen
+        # chains ("sim-to-real-style") survive too. Right boundary
+        # excludes both alnum AND hyphen so we never undershoot.
         pattern = re.compile(
             r"(?<![A-Za-z0-9_])"
             + re.escape(escaped_term)
-            + r"(?![A-Za-z0-9_])",
+            + r"(?:-[A-Za-z]+)*"
+            + r"(?![A-Za-z0-9_-])",
             re.IGNORECASE,
         )
         # Match the literal substring only when it's NOT inside an
