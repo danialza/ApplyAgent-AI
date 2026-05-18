@@ -332,7 +332,8 @@ _LATEX_TEMPLATE = r"""
 
     \vspace{3pt}
 
-    << header_line >>
+    % Contact line — small + tight separators so 5+ items fit one line.
+    {\small << header_line >>}
 \end{center}
 
 \vspace{-0.05cm}
@@ -379,7 +380,7 @@ _LATEX_TEMPLATE = r"""
 <% endfor %>
 <% endif %>
 <% if all_projects %>
-\section{Projects \hrulefill}
+\section{Selected Projects \hrulefill}
 
 <% for p in all_projects %>
 \begin{onecolentry}
@@ -495,7 +496,8 @@ def _header_line(header, *, utm_campaign: str = "") -> str:
         url = _with_utm(raw, utm_campaign)
         display = raw.replace("https://", "").replace("http://", "")
         parts.append(rf"\href{{{url}}}{{{latex_escape(display)}}}")
-    return " \\quad | \\quad\n    ".join(parts)
+    # Tight separator (no quad spacing) so the line fits at \small.
+    return r" \, | \, ".join(parts)
 
 
 # ---------- Public API ----------
