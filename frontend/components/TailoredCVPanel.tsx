@@ -816,8 +816,12 @@ function LLMStatusBanner({
         <p className="text-[11px] opacity-80">{detail}</p>
       </div>
       <div className="flex items-center gap-1.5">
-        {/* Provider switcher — claude_code uses your Pro sub (free
-            quota), anthropic / openai use API credits. */}
+        {/* Provider switcher. claude_code (Pro CLI) is interactive-
+            only — Anthropic doesn't authorise headless `claude --print`
+            with a Pro/Max subscription, so it can't power an
+            automated backend. Kept selectable only when already
+            active so the user isn't stuck; not offered as a fresh
+            pick. anthropic / openai are the real choices. */}
         <select
           value={status?.provider || ""}
           onChange={(e) =>
@@ -825,11 +829,13 @@ function LLMStatusBanner({
           }
           disabled={checking}
           className="rounded-md border border-current/30 bg-white px-1.5 py-1 text-xs font-medium disabled:opacity-50"
-          title="Switch provider live. claude_code = Pro plan (free quota). anthropic/openai = pay-per-token API."
+          title="Anthropic / OpenAI use pay-per-token API. Claude SDK (Pro) only works for the interactive Claude Code TUI, not a headless backend."
         >
-          <option value="claude_code">Claude SDK (Pro)</option>
           <option value="anthropic">Anthropic API</option>
           <option value="openai">OpenAI API</option>
+          {status?.provider === "claude_code" && (
+            <option value="claude_code">Claude SDK (Pro) — headless unsupported</option>
+          )}
         </select>
         <button
           type="button"

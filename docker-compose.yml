@@ -62,8 +62,11 @@ services:
       #   ~/.claude/        (folder: backups, cache, history)
       #   ~/.claude.json    (single file: account + session token)
       # Both must be mounted or CLI errors with "config not found".
-      - ${HOME}/.claude:/home/app/.claude:ro
-      - ${HOME}/.claude.json:/home/app/.claude.json:ro
+      # NOTE: read-WRITE — the claude CLI rewrites .claude.json on
+      # every run (session/usage update). A :ro mount makes the CLI
+      # think the file is corrupt and bail. RW lets it self-maintain.
+      - ${HOME}/.claude:/home/app/.claude
+      - ${HOME}/.claude.json:/home/app/.claude.json
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
       interval: 30s
