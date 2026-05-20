@@ -829,10 +829,21 @@ function LLMStatusBanner({
           }
           disabled={checking}
           className="rounded-md border border-current/30 bg-white px-1.5 py-1 text-xs font-medium disabled:opacity-50"
-          title="Anthropic / OpenAI use pay-per-token API. Claude SDK (Pro) only works for the interactive Claude Code TUI, not a headless backend."
+          title="Only providers with an API key in .env are listed. Add a key + restart to enable more."
         >
-          <option value="anthropic">Anthropic API</option>
-          <option value="openai">OpenAI API</option>
+          {(() => {
+            // Only offer providers that actually have a key. Empty
+            // list → show a disabled hint instead of dead options.
+            const avail = status?.available_providers || [];
+            if (avail.length === 0) {
+              return <option value="">No API key configured</option>;
+            }
+            return avail.map((p) => (
+              <option key={p} value={p}>
+                {p === "anthropic" ? "Anthropic API" : p === "openai" ? "OpenAI API" : p}
+              </option>
+            ));
+          })()}
           {status?.provider === "claude_code" && (
             <option value="claude_code">Claude SDK (Pro) — headless unsupported</option>
           )}

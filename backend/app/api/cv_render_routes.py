@@ -244,6 +244,15 @@ def llm_status() -> dict:
     """
     from app.services import llm_extraction_service as llm
 
+    import os as _os
+    # Which providers have a usable key configured. The UI dropdown
+    # only offers these so the user can't pick a dead provider.
+    available: list[str] = []
+    if _os.getenv("ANTHROPIC_API_KEY"):
+        available.append("anthropic")
+    if _os.getenv("OPENAI_API_KEY"):
+        available.append("openai")
+
     status_dict: dict = {
         "enabled": llm.is_enabled(),
         "configured": False,
@@ -252,12 +261,26 @@ def llm_status() -> dict:
         "model": "",
         "base_url": "",
         "error": "",
+        "available_providers": available,
     }
     if not llm.is_enabled():
-        status_dict["error"] = (
-            "LLM disabled — set USE_LLM_EXTRACTION=true and either "
-            "OPENAI_API_KEY or ANTHROPIC_API_KEY in .env, then restart."
-        )
+        active = (_os.getenv("LLM_PROVIDER") or "").strip().lower()
+        if active == "openai" and "openai" not in available:
+            status_dict["error"] = (
+                "OpenAI selected but no OPENAI_API_KEY configured. "
+                "Switch to Anthropic, or add OPENAI_API_KEY to .env "
+                "and restart."
+            )
+        elif active == "anthropic" and "anthropic" not in available:
+            status_dict["error"] = (
+                "Anthropic selected but no ANTHROPIC_API_KEY configured. "
+                "Add it to .env and restart."
+            )
+        else:
+            status_dict["error"] = (
+                "LLM disabled — set USE_LLM_EXTRACTION=true and either "
+                "OPENAI_API_KEY or ANTHROPIC_API_KEY in .env, then restart."
+            )
         return status_dict
 
     cfg = llm._config()  # type: ignore[attr-defined]

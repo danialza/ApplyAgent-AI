@@ -426,6 +426,8 @@ export interface LLMStatus {
   model: string;
   base_url: string;
   error: string;
+  /** Providers with a usable API key — UI offers only these. */
+  available_providers?: string[];
 }
 
 export interface RenderCVResponse {
