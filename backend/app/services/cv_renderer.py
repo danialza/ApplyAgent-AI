@@ -254,11 +254,13 @@ def _rank_entries(
         for idx, item in enumerate(items)
     ]
     if drop_zero:
-        # Threshold = 1.0. A project matching only generic tokens
-        # (Python, Git, Docker @ 0.3 each) won't clear this unless it
-        # has 4+ generic matches. Specific single-word or any
-        # multi-word match clears immediately.
-        positive = [(s, i, x) for s, i, x in decorated if s >= 1.0]
+        # Threshold = > 0. Any tag-overlap survives — the LLM
+        # relevance ranker downstream judges semantic fit. Previous
+        # 1.0 threshold dropped projects with only-generic Python
+        # overlap (NSP, AI Job-CV scored 0.3) before the LLM could
+        # see them, even though those projects were directly on-topic
+        # for agentic / production-AI JDs.
+        positive = [(s, i, x) for s, i, x in decorated if s > 0]
         # Never return empty — keep the best-scoring entry when no
         # project meets the threshold.
         if positive:
@@ -596,23 +598,44 @@ def render_cv(
     # their aliases (plus metrics from _bold_metrics).
 
     # ---- Rank and cap each section.
-    # Projects: drop entries that score 0 against the JD so an
-    # unrelated robotics project doesn't fill a cap slot on a legal-AI
-    # CV. Experience stays full because employment history shouldn't
-    # have gaps (recruiters notice).
-    selected = _rank_entries(
+    # Projects: drop_zero drops zero-tag-overlap entries first, then an
+    # LLM re-ranker reorders the survivors by JD intent (production /
+    # research / agentic / etc.) so workshop projects don't outrank
+    # production systems on tag overlap alone.
+    sel_pool = _rank_entries(
         list(library.selected_projects),
         jd_terms,
         lambda p: list(p.tags or []) + list(p.highlights or []),
         drop_zero=True,
-    )[:max_selected_projects] if max_selected_projects else []
-
-    additional = _rank_entries(
+    )
+    add_pool = _rank_entries(
         list(library.additional_projects),
         jd_terms,
         lambda p: list(p.tags or []) + list(p.highlights or []),
         drop_zero=True,
-    )[:max_additional_projects] if max_additional_projects else []
+    )
+
+    if job and (job.raw_text or "").strip() and (sel_pool or add_pool):
+        try:
+            from app.services.project_relevance_ranker import rank_projects
+            # Combined pool — selected_projects historically have
+            # higher signal so they stay together when LLM ranks. We
+            # re-rank EACH list independently to preserve the
+            # selected vs additional split downstream.
+            sel_order = rank_projects(job.raw_text, sel_pool)
+            if sel_order is not None:
+                sel_pool = [sel_pool[i] for i in sel_order]
+            add_order = rank_projects(job.raw_text, add_pool)
+            if add_order is not None:
+                add_pool = [add_pool[i] for i in add_order]
+        except Exception as exc:  # noqa: BLE001
+            import logging as _log
+            _log.getLogger("ai_job_cv_matcher.renderer").warning(
+                "Project LLM re-rank failed (using tag overlap): %s", exc,
+            )
+
+    selected = sel_pool[:max_selected_projects] if max_selected_projects else []
+    additional = add_pool[:max_additional_projects] if max_additional_projects else []
 
     experience = _rank_entries(
         list(library.experience),
