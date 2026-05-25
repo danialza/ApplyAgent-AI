@@ -205,12 +205,20 @@ _GENERIC_TAG_GROUPS: set[str] = {
 def _entry_score(entry_terms: Iterable[str], jd_groups: set[str]) -> float:
     """Weighted overlap score. Multi-word JD terms count 3x, generic
     single tokens (Python, Git, Docker) count 0.3x, everything else 1x.
-    Returns float so the ranker can break ties more cleanly than the
-    old integer count."""
+
+    Match has two passes:
+      * EXACT group_key match on each entry term (catches single-token
+        tags like "MuJoCo" or "Python").
+      * SUBSTRING match of JD canonical inside the combined entry
+        blob (catches multi-word canonicals like "robot learning"
+        embedded in bullets like "cloning-style robot learning
+        workflows" which exact-key match misses).
+    """
     if not jd_groups:
         return 0.0
     hits: set[str] = set()
     score = 0.0
+    # Pass 1: exact group_key match per term.
     for t in entry_terms:
         if not t:
             continue
@@ -219,11 +227,28 @@ def _entry_score(entry_terms: Iterable[str], jd_groups: set[str]) -> float:
             continue
         hits.add(gk)
         if " " in gk:
-            score += 3.0           # specific multi-word match
+            score += 3.0
         elif gk in _GENERIC_TAG_GROUPS:
-            score += 0.3           # generic token — weak signal
+            score += 0.3
         else:
-            score += 1.0           # specific single-word
+            score += 1.0
+    # Pass 2: word-boundary regex search for each remaining JD group
+    # inside the combined entry blob. Multi-word groups always go
+    # through. Single-word groups go through unless they're in the
+    # generic set (Python, Git, etc. would false-match too much).
+    blob = " ".join(t.lower() for t in entry_terms if t)
+    if blob:
+        for gk in jd_groups:
+            if not gk or gk in hits:
+                continue
+            is_multi = " " in gk
+            if not is_multi and gk in _GENERIC_TAG_GROUPS:
+                continue  # generic single tokens skipped
+            # Word-boundary search prevents "ai" matching "main".
+            pattern = re.compile(r"\b" + re.escape(gk) + r"\b")
+            if pattern.search(blob):
+                hits.add(gk)
+                score += 3.0 if is_multi else 1.0
     return score
 
 
