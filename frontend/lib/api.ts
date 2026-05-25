@@ -396,4 +396,20 @@ export async function deleteUrlSource(id: number): Promise<void> {
   }
 }
 
+export async function addNotesSource(text: string, title?: string): Promise<UnifiedSource> {
+  const res = await fetch(`${API_BASE}/api/sources/notes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, title: title || undefined }),
+  });
+  return handle<UnifiedSource>(res);
+}
+
+export async function deleteNotesSource(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/sources/notes/${id}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) {
+    throw new ApiError(`Delete failed (HTTP ${res.status})`, res.status);
+  }
+}
+
 export { ApiError, API_BASE };

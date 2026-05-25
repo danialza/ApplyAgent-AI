@@ -14,6 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
+from datetime import datetime as _datetime
+
 from app.db.database import get_db
 from app.models.db_models import CV, CVLibrary, Document, WebSource
 from app.models.schemas import (
@@ -132,6 +134,53 @@ def source_breakdown(db: Session = Depends(get_db)) -> dict:
     _count(row.certifications, "certifications")
 
     return {"by_source": by_source}
+
+
+# ---------- Free-text notes ingest ----------
+
+@router.post("/notes", response_model=UnifiedSource, status_code=status.HTTP_201_CREATED)
+def add_notes(payload: dict, db: Session = Depends(get_db)) -> UnifiedSource:
+    """Dump free-form text into the master CV. The builder + LLM
+    curator extract projects / skills / experience / publications
+    from the text on the next rebuild, then merge into master.
+
+    Body: ``{"text": "...", "title": "optional name"}``. Stored as
+    a Document row (existing infra), so it shows up in the source
+    list and contributes to every future master rebuild until you
+    delete it.
+    """
+    text = (payload or {}).get("text", "")
+    if not isinstance(text, str) or not text.strip():
+        raise HTTPException(status_code=400, detail="Empty 'text' field.")
+    title = ((payload or {}).get("title") or "").strip()
+    if not title:
+        title = f"notes-{_datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.txt"
+    doc = Document(filename=title, raw_text=text.strip())
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+
+    _rebuild_library_silent(db)
+
+    return UnifiedSource(
+        id=doc.id,
+        kind="document",
+        title=doc.filename,
+        detail=f"{len(text.splitlines())} lines · free-form notes",
+        status="done",
+        created_at=doc.created_at,
+    )
+
+
+@router.delete("/notes/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_notes(doc_id: int, db: Session = Depends(get_db)) -> None:
+    """Remove a notes/document source and rebuild master."""
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if doc is None:
+        return
+    db.delete(doc)
+    db.commit()
+    _rebuild_library_silent(db)
 
 
 # ---------- WebSource CRUD ----------

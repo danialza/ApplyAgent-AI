@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import {
+  addNotesSource,
   addUrlSource,
   deleteCV,
+  deleteNotesSource,
   deleteUrlSource,
   fetchSourceBreakdown,
   listAllSources,
@@ -44,6 +46,8 @@ export default function UnifiedSourcePanel({ onError, onSourcesChanged }: Props)
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
   const [loading, setLoading] = useState(false);
   const [urlInput, setUrlInput] = useState("");
+  const [notesInput, setNotesInput] = useState("");
+  const [addingNotes, setAddingNotes] = useState(false);
   const [addingUrl, setAddingUrl] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [uploadingMd, setUploadingMd] = useState(false);
@@ -136,6 +140,21 @@ export default function UnifiedSourcePanel({ onError, onSourcesChanged }: Props)
     }
   }
 
+  async function handleAddNotes() {
+    const text = notesInput.trim();
+    if (!text) return;
+    setAddingNotes(true);
+    try {
+      await addNotesSource(text);
+      setNotesInput("");
+      notifyChanged();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Notes add failed.");
+    } finally {
+      setAddingNotes(false);
+    }
+  }
+
   async function handleAddUrl() {
     const url = urlInput.trim();
     if (!url) return;
@@ -164,9 +183,10 @@ export default function UnifiedSourcePanel({ onError, onSourcesChanged }: Props)
         await fetch(`${API_BASE}/api/cv/library/rebuild`, { method: "POST" });
       } else if (s.kind === "web" || s.kind === "github_user" || s.kind === "github_repo") {
         await deleteUrlSource(s.id);
+      } else if (s.kind === "document") {
+        await deleteNotesSource(s.id);
       } else {
-        // Documents have no delete route yet; surface a hint instead of failing.
-        onError("Documents can't be deleted individually yet. Use /api/profile to wipe all.");
+        onError(`Cannot delete sources of kind ${s.kind}.`);
         return;
       }
       notifyChanged();
@@ -251,6 +271,49 @@ export default function UnifiedSourcePanel({ onError, onSourcesChanged }: Props)
               {addingUrl ? "Adding…" : "Add URL"}
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Free-text chatbox — dump anything, LLM merges into master.
+          Spans full width so multi-paragraph dumps fit. */}
+      <div className="space-y-2 rounded-lg border border-violet-300 bg-violet-50 p-3">
+        <div>
+          <p className="text-sm font-semibold text-violet-900">
+            Tell the system anything (free-form notes)
+          </p>
+          <p className="text-xs text-violet-700">
+            Paste a paragraph about a new project, a skill you forgot
+            to mention, a publication, a side gig, anything. Saved as
+            a Document source; the master CV rebuilds and the LLM
+            curator picks up new projects / skills / experience / pubs
+            on the next render.
+          </p>
+        </div>
+        <textarea
+          value={notesInput}
+          onChange={(e) => setNotesInput(e.target.value)}
+          rows={5}
+          placeholder="e.g. 'Last month I built a Bedrock-based MCP server for a fintech client. Used AWS Lambda + Python. Integrated with their Stripe webhook flow.'"
+          className="w-full rounded-md border border-violet-200 bg-white px-2 py-1.5 text-xs text-slate-800 focus:border-violet-500 focus:outline-none"
+          disabled={addingNotes}
+        />
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setNotesInput("")}
+            disabled={addingNotes || !notesInput.trim()}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={handleAddNotes}
+            disabled={addingNotes || !notesInput.trim()}
+            className="rounded-md bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+          >
+            {addingNotes ? "Adding…" : "Add to master CV"}
+          </button>
         </div>
       </div>
 
