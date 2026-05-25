@@ -570,6 +570,99 @@ def _merge_pub(target: PublicationEntry, incoming: PublicationEntry, source_key:
     _record_source(target, source_key)
 
 
+def _union_libraries(primary: CVLibraryBase, secondary: CVLibraryBase) -> CVLibraryBase:
+    """Merge secondary into primary. Primary fields win. List-typed
+    fields (projects, experience, skills_groups, etc.) get APPENDED
+    with secondary entries that don't already exist (dedup by lower-
+    case key).
+
+    Use case: primary = cv.md parsed structure (user's curated CV);
+    secondary = aggregate from CVs + Documents + URL extracts. Notes
+    or GitHub repos can ADD new projects but never erase what's in
+    cv.md.
+    """
+    out = primary.model_copy(deep=True)
+
+    # Header: fill any empty primary field from secondary.
+    if not (out.header.name or "").strip():
+        out.header.name = secondary.header.name
+    if not (out.header.email or "").strip():
+        out.header.email = secondary.header.email
+    if not (out.header.phone or "").strip():
+        out.header.phone = secondary.header.phone
+    if not (out.header.location or "").strip():
+        out.header.location = secondary.header.location
+    if not (out.header.website or "").strip():
+        out.header.website = secondary.header.website
+    if not (out.header.linkedin or "").strip():
+        out.header.linkedin = secondary.header.linkedin
+    if not (out.header.github or "").strip():
+        out.header.github = secondary.header.github
+
+    # Summary: keep primary unless empty.
+    if not (out.summary or "").strip() and secondary.summary:
+        out.summary = secondary.summary
+
+    # Skills: union by group label, items by case-insensitive uniqueness.
+    primary_labels = {g.label.lower(): g for g in out.skills_groups}
+    for sg in secondary.skills_groups:
+        existing = primary_labels.get(sg.label.lower())
+        if existing is not None:
+            seen = {s.lower() for s in existing.items}
+            for s in sg.items:
+                if s.lower() not in seen:
+                    existing.items.append(s)
+                    seen.add(s.lower())
+        else:
+            out.skills_groups.append(sg)
+            primary_labels[sg.label.lower()] = sg
+
+    # Entry lists: dedup by lowercased title (or institution+degree
+    # for education).
+    def _merge_by_key(dst, src, key_fn):
+        seen = {key_fn(e) for e in dst}
+        for e in src:
+            k = key_fn(e)
+            if k and k not in seen:
+                dst.append(e)
+                seen.add(k)
+
+    _merge_by_key(out.selected_projects, secondary.selected_projects,
+                  lambda p: (p.title or "").lower())
+    _merge_by_key(out.additional_projects, secondary.additional_projects,
+                  lambda p: (p.title or "").lower())
+    _merge_by_key(out.experience, secondary.experience,
+                  lambda x: f"{(x.title or '').lower()}|{(x.company or '').lower()}")
+    _merge_by_key(out.education, secondary.education,
+                  lambda e: f"{(e.institution or '').lower()}|{(e.degree or '').lower()}")
+    _merge_by_key(out.certifications, secondary.certifications,
+                  lambda c: (c.name or "").lower())
+    _merge_by_key(out.publications, secondary.publications,
+                  lambda p: (p.title or "").lower())
+
+    # Languages: union deduped by head token.
+    if secondary.languages:
+        seen_lang = {(l or "").split(":")[0].split("(")[0].strip().lower() for l in out.languages}
+        for l in secondary.languages:
+            head = (l or "").split(":")[0].split("(")[0].strip().lower()
+            if head and head not in seen_lang:
+                out.languages.append(l)
+                seen_lang.add(head)
+
+    # Core competencies, project_links: keep primary; add unmatched from secondary.
+    primary_comp = {(c.name or "").lower() for c in out.core_competencies}
+    for c in secondary.core_competencies:
+        if (c.name or "").lower() not in primary_comp:
+            out.core_competencies.append(c)
+            primary_comp.add((c.name or "").lower())
+
+    for k, v in (secondary.project_links or {}).items():
+        if k not in out.project_links:
+            out.project_links[k] = v
+
+    return out
+
+
 def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
     """Merge every uploaded CV + Document into one library.
 
@@ -583,9 +676,28 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
     cvs: list[CVRow] = (
         db.query(CVRow).order_by(CVRow.created_at.asc()).all()
     )
-    docs: list[DocumentRow] = (
+    # Split documents: cv-md: prefix is a structured markdown CV used
+    # as the base library. Plain documents add on top via the usual
+    # extractor.
+    all_docs: list[DocumentRow] = (
         db.query(DocumentRow).order_by(DocumentRow.created_at.asc()).all()
     )
+    md_docs = [d for d in all_docs if (d.filename or "").startswith("cv-md:")]
+    docs = [d for d in all_docs if not (d.filename or "").startswith("cv-md:")]
+
+    # If a markdown CV exists, parse it as the structured base. Later
+    # source contributions (CVs, plain documents, URLs) UNION onto
+    # the cv.md skeleton instead of replacing it.
+    md_base: CVLibraryBase | None = None
+    if md_docs:
+        from app.services.cv_markdown_parser import parse_cv_markdown
+        # Use the latest cv-md document if multiple somehow exist.
+        latest = md_docs[-1]
+        try:
+            md_base = parse_cv_markdown(latest.raw_text or "")
+        except Exception:  # noqa: BLE001
+            md_base = None
+
     web_sources: list[WebSourceRow] = (
         db.query(WebSourceRow)
         .filter(WebSourceRow.status == "done")
@@ -853,6 +965,12 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
         languages=languages,
         project_links=project_links,  # carried forward from existing row
     )
+
+    # Union cv-md base into the aggregate. cv.md is the structured
+    # ground truth — anything it declares stays; aggregated source
+    # entries augment empty fields or append new dedup-keyed entries.
+    if md_base is not None:
+        base = _union_libraries(md_base, base)
     # LLM-driven curation: collapse near-duplicate project titles
     # across sources (e.g. CV "TalkingHeadAI" + GitHub repo
     # "talkinghead-ai"), drop pure-noise GitHub repos (profile-readme,

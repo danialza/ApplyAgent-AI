@@ -360,6 +360,21 @@ async def upload_library_markdown(
             detail="Empty file.",
         )
 
+    # Persist the raw markdown as a Document source so subsequent
+    # rebuilds (triggered by notes / URL adds) can re-parse it as the
+    # library base. Without this the markdown was a one-shot write to
+    # cv_library and the next source change rebuilt from an empty
+    # sources table — wiping all cv.md content.
+    from app.models.db_models import Document as _Doc
+    fname = (file.filename or "cv.md").strip()
+    # Mark the document so the builder identifies it as the structured
+    # CV base. Filename prefix is enough — builder matches on it.
+    if not fname.startswith("cv-md:"):
+        fname = f"cv-md:{fname}"
+    # Replace any prior cv-md document so re-uploads don't pile up.
+    db.query(_Doc).filter(_Doc.filename.like("cv-md:%")).delete()
+    db.add(_Doc(filename=fname, raw_text=text))
+
     payload = parse_cv_markdown(text)
     row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
     if row is None:
