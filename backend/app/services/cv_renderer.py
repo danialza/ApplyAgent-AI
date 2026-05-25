@@ -794,7 +794,12 @@ def render_cv(
             return rf"\textbf{{{latex_escape(name.strip())}}}: {latex_escape(rest.strip())}"
         return rf"\textbf{{{latex_escape(s)}}}"
 
-    languages_line = ", ".join(_render_lang(l) for l in (library.languages or []))
+    # Big gap between languages so "English: Native" / "Farsi: Native"
+    # don't visually collide. \quad{} ≈ 1em ≈ 6 spaces; doubled for
+    # clear separation. No trailing comma.
+    languages_line = r" \quad{}\quad{} ".join(
+        _render_lang(l) for l in (library.languages or [])
+    )
 
     skills_groups_payload = [
         {"label": g.label, "items_rendered": render_skill_items(g.items)}
