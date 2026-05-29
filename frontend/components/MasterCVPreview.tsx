@@ -49,6 +49,16 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
     setEditorOpen(true);
   }
 
+  async function handleDeleteEntry(section: string, index: number, label: string) {
+    if (!confirm(`Remove "${label}" from the master CV?\n\nRecorded as a user-patch — survives future source rebuilds. Undo by editing the library JSON.`)) return;
+    try {
+      await applyLibraryFix({ kind: "drop_entry", payload: { section, index } });
+      window.location.reload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Delete failed");
+    }
+  }
+
   async function saveEditor() {
     setEditorSaving(true);
     try {
@@ -385,57 +395,63 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
         </details>
       )}
 
-      {/* Entry sections — collapsible with per-entry source chips */}
+      {/* Entry sections — collapsible, per-entry source chips + delete.
+          Delete posts a drop_entry user-patch (survives rebuilds). */}
       <EntryList
         title={SECTION_LABELS.projects}
-        entries={[...lib.selected_projects, ...lib.additional_projects].map((p) => ({
-          line: p.title,
-          period: p.period,
-          tags: p.tags,
-          sources: p.sources || [],
-        }))}
+        entries={[
+          ...lib.selected_projects.map((p, i) => ({
+            line: p.title, period: p.period, tags: p.tags,
+            sources: p.sources || [], section: "selected_projects", index: i,
+          })),
+          ...lib.additional_projects.map((p, i) => ({
+            line: p.title, period: p.period, tags: p.tags,
+            sources: p.sources || [], section: "additional_projects", index: i,
+          })),
+        ]}
         sourceLabels={sourceLabels}
         openByDefault
+        onDelete={handleDeleteEntry}
       />
       <EntryList
         title={SECTION_LABELS.experience}
-        entries={lib.experience.map((x) => ({
+        entries={lib.experience.map((x, i) => ({
           line: x.company ? `${x.title} @ ${x.company}` : x.title,
-          period: x.period,
-          tags: x.tags,
-          sources: x.sources || [],
+          period: x.period, tags: x.tags, sources: x.sources || [],
+          section: "experience", index: i,
         }))}
         sourceLabels={sourceLabels}
+        onDelete={handleDeleteEntry}
       />
       <EntryList
         title={SECTION_LABELS.publications}
-        entries={lib.publications.map((p) => ({
+        entries={lib.publications.map((p, i) => ({
           line: p.status ? `[${p.status}] ${p.title}` : p.title,
-          period: "",
-          tags: p.tags,
-          sources: p.sources || [],
+          period: "", tags: p.tags, sources: p.sources || [],
+          section: "publications", index: i,
         }))}
         sourceLabels={sourceLabels}
+        onDelete={handleDeleteEntry}
       />
       <EntryList
         title={SECTION_LABELS.certifications}
-        entries={lib.certifications.map((c) => ({
+        entries={lib.certifications.map((c, i) => ({
           line: c.issuer ? `${c.issuer}: ${c.name}` : c.name,
-          period: "",
-          tags: c.tags,
-          sources: c.sources || [],
+          period: "", tags: c.tags, sources: c.sources || [],
+          section: "certifications", index: i,
         }))}
         sourceLabels={sourceLabels}
+        onDelete={handleDeleteEntry}
       />
       <EntryList
         title={SECTION_LABELS.education}
-        entries={lib.education.map((e) => ({
+        entries={lib.education.map((e, i) => ({
           line: `${e.institution} — ${e.degree}`,
-          period: e.period,
-          tags: [],
-          sources: e.sources || [],
+          period: e.period, tags: [], sources: e.sources || [],
+          section: "education", index: i,
         }))}
         sourceLabels={sourceLabels}
+        onDelete={handleDeleteEntry}
       />
     </div>
   );
@@ -455,16 +471,27 @@ function CounterChip({ label, n }: { label: string; n: number }) {
   );
 }
 
+interface EntryRow {
+  line: string;
+  period: string;
+  tags: string[];
+  sources: string[];
+  section: string;
+  index: number;
+}
+
 function EntryList({
   title,
   entries,
   sourceLabels,
   openByDefault = false,
+  onDelete,
 }: {
   title: string;
-  entries: { line: string; period: string; tags: string[]; sources: string[] }[];
+  entries: EntryRow[];
   sourceLabels: Record<string, string>;
   openByDefault?: boolean;
+  onDelete?: (section: string, index: number, label: string) => void;
 }) {
   if (entries.length === 0) return null;
   return (
@@ -477,8 +504,18 @@ function EntryList({
       </summary>
       <ul className="mt-1 space-y-1">
         {entries.map((e, i) => (
-          <li key={i} className="flex flex-wrap items-baseline gap-1 text-slate-700">
-            <span className="font-medium">· {e.line}</span>
+          <li key={i} className="group flex flex-wrap items-baseline gap-1 text-slate-700">
+            {onDelete && (
+              <button
+                type="button"
+                onClick={() => onDelete(e.section, e.index, e.line)}
+                className="shrink-0 rounded px-1 text-[11px] font-bold text-rose-400 hover:bg-rose-50 hover:text-rose-700"
+                title="Remove from master CV"
+              >
+                ✕
+              </button>
+            )}
+            <span className="font-medium">{e.line}</span>
             {e.period && <span className="text-[10px] text-slate-500">{e.period}</span>}
             {e.sources.map((sk) => (
               <SourceChip key={sk} sourceKey={sk} label={sourceLabels[sk] || sk} />
