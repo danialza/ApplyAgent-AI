@@ -715,6 +715,33 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
     blocks_by_cv = {cv.id: extract_section_blocks(cv.raw_text or "") for cv in cvs}
     blocks_by_doc = {d.id: extract_section_blocks(d.raw_text or "") for d in docs}
 
+    # Free-form notes: a plain document with NO recognisable project/
+    # experience section blocks is prose the user dumped in the
+    # chatbox. The block parser extracts nothing from prose, so run
+    # an LLM notes extractor to pull structured projects / skills /
+    # experience. Collected here, unioned into the library at the end.
+    notes_libs: list[CVLibraryBase] = []
+    for d in docs:
+        b = blocks_by_doc[d.id]
+        has_blocks = any(
+            (b.get(k) or "").strip()
+            for k in ("selected_projects", "additional_projects", "projects",
+                      "experience", "publications")
+        )
+        if has_blocks:
+            continue
+        try:
+            from app.services.notes_extractor import extract_entries
+            frag = extract_entries(d.raw_text or "")
+            if (frag.selected_projects or frag.experience
+                    or frag.publications or frag.skills_groups):
+                notes_libs.append(frag)
+        except Exception as exc:  # noqa: BLE001
+            import logging as _log
+            _log.getLogger("ai_job_cv_matcher.builder").warning(
+                "Notes extraction failed for doc %s: %s", d.id, exc,
+            )
+
     # ----- Header: newest CV wins for each field, but never overwrite a
     # populated value with an empty one from an older CV. -----
     header = CVHeader()
@@ -971,6 +998,20 @@ def build_library_from_all(db: Session, *, location: str = "") -> CVLibraryBase:
     # entries augment empty fields or append new dedup-keyed entries.
     if md_base is not None:
         base = _union_libraries(md_base, base)
+
+    # Union LLM-extracted notes (free-form chatbox prose). base is
+    # primary so cv.md / CV entries win; notes ADD new projects /
+    # skills / experience that weren't already present.
+    for frag in notes_libs:
+        base = _union_libraries(base, frag)
+
+    # Notes skills land in a raw "From Notes" group via union. Re-run
+    # the categoriser over the FULL flattened skill set so they get
+    # bucketed alongside everything else (no stray "From Notes" group).
+    if notes_libs:
+        from app.services.skill_categorizer import categorise as _categorise
+        flat = [s for g in base.skills_groups for s in (g.items or [])]
+        base.skills_groups = _categorise(flat)
     # LLM-driven curation: collapse near-duplicate project titles
     # across sources (e.g. CV "TalkingHeadAI" + GitHub repo
     # "talkinghead-ai"), drop pure-noise GitHub repos (profile-readme,
