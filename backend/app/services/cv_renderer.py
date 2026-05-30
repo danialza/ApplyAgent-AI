@@ -680,13 +680,29 @@ def render_cv(
         lambda p: list(p.tags or []) + [p.title, p.venue],
     )
 
-    # ---- Skills groups: reorder so categories with JD-matched items come first.
-    def group_score(g) -> int:
-        return _entry_score(g.items, jd_groups)
-
-    skills_groups_sorted = sorted(
-        list(library.skills_groups), key=lambda g: -group_score(g),
-    )
+    # ---- Skills groups: tailor per JD.
+    # First try LLM-driven tailoring (reorders + filters items per JD).
+    # Fall back to score-based group ordering when LLM off / fails.
+    skills_groups_sorted: list = list(library.skills_groups)
+    if job and (job.raw_text or "").strip() and library.skills_groups:
+        try:
+            from app.services.skill_tailor import tailor_skills
+            tailored = tailor_skills(job.raw_text, list(library.skills_groups))
+            if tailored:
+                skills_groups_sorted = tailored
+            else:
+                # Fallback: tag-score reorder of groups.
+                def _gs(g):
+                    return _entry_score(g.items, jd_groups)
+                skills_groups_sorted = sorted(skills_groups_sorted, key=lambda g: -_gs(g))
+        except Exception as exc:  # noqa: BLE001
+            import logging as _log
+            _log.getLogger("ai_job_cv_matcher.renderer").warning(
+                "Skill tailor failed (using score fallback): %s", exc,
+            )
+            def _gs(g):
+                return _entry_score(g.items, jd_groups)
+            skills_groups_sorted = sorted(skills_groups_sorted, key=lambda g: -_gs(g))
 
     # ---- Bold + escape all bullet text in one pass.
     def render_bullet(text: str) -> str:
