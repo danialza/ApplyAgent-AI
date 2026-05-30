@@ -582,8 +582,14 @@ def render_cv(
     compile_pdf: bool = False,
     min_competency_rating: int = 3,
     core_competencies_override: list[str] | None = None,
+    use_llm_polish: bool = False,
 ) -> RenderResult:
     """Render a tailored CV. See module docstring for the pipeline."""
+    # Stash the ORIGINAL (pre-polish) library — project ranker scores
+    # against this so polish-rewritten bullets can't game ranking
+    # (used to surface robotics projects on data JDs by sprinkling
+    # JD-vocab into their bullets).
+    original_library = library.model_copy(deep=True)
     # UTM tracking — empty for master CV renders (no JD), populated
     # for tailored renders so the candidate can attribute portfolio
     # clicks to a specific application.
@@ -627,14 +633,16 @@ def render_cv(
     # LLM re-ranker reorders the survivors by JD intent (production /
     # research / agentic / etc.) so workshop projects don't outrank
     # production systems on tag overlap alone.
+    # Score against ORIGINAL library (not yet polished). Polish runs
+    # later inside this function on the surviving top-N.
     sel_pool = _rank_entries(
-        list(library.selected_projects),
+        list(original_library.selected_projects),
         jd_terms,
         lambda p: list(p.tags or []) + list(p.highlights or []),
         drop_zero=True,
     )
     add_pool = _rank_entries(
-        list(library.additional_projects),
+        list(original_library.additional_projects),
         jd_terms,
         lambda p: list(p.tags or []) + list(p.highlights or []),
         drop_zero=True,
@@ -643,10 +651,6 @@ def render_cv(
     if job and (job.raw_text or "").strip() and (sel_pool or add_pool):
         try:
             from app.services.project_relevance_ranker import rank_projects
-            # Combined pool — selected_projects historically have
-            # higher signal so they stay together when LLM ranks. We
-            # re-rank EACH list independently to preserve the
-            # selected vs additional split downstream.
             sel_order = rank_projects(job.raw_text, sel_pool)
             if sel_order is not None:
                 sel_pool = [sel_pool[i] for i in sel_order]
@@ -659,26 +663,50 @@ def render_cv(
                 "Project LLM re-rank failed (using tag overlap): %s", exc,
             )
 
-    selected = sel_pool[:max_selected_projects] if max_selected_projects else []
-    additional = add_pool[:max_additional_projects] if max_additional_projects else []
+    # Map ranked ORIGINAL entries back to their POLISHED counterparts
+    # for rendering (polish preserves titles per its prompt). Ranking
+    # used original tags+bullets; display uses polished bullets.
+    polished_lookup = {
+        (p.title or "").lower(): p
+        for p in list(library.selected_projects) + list(library.additional_projects)
+        if (p.title or "").strip()
+    }
 
-    experience = _rank_entries(
-        list(library.experience),
+    def _polished_or_original(p):
+        return polished_lookup.get((p.title or "").lower(), p)
+
+    selected = [_polished_or_original(p) for p in sel_pool[:max_selected_projects]] if max_selected_projects else []
+    additional = [_polished_or_original(p) for p in add_pool[:max_additional_projects]] if max_additional_projects else []
+
+    # Experience / certs / pubs: rank on ORIGINAL, render POLISHED.
+    exp_lookup = {(x.title or "").lower() + "|" + (x.company or "").lower(): x
+                  for x in library.experience}
+    cert_lookup = {(c.name or "").lower(): c for c in library.certifications}
+    pub_lookup = {(p.title or "").lower(): p for p in library.publications}
+
+    experience_ranked = _rank_entries(
+        list(original_library.experience),
         jd_terms,
         lambda x: list(x.tags or []) + list(x.highlights or []),
     )[:max_experience] if max_experience else []
+    experience = [
+        exp_lookup.get((x.title or "").lower() + "|" + (x.company or "").lower(), x)
+        for x in experience_ranked
+    ]
 
-    # Certifications + publications: rank by tag overlap; keep all.
-    certifications = _rank_entries(
-        list(library.certifications),
+    certs_ranked = _rank_entries(
+        list(original_library.certifications),
         jd_terms,
         lambda c: list(c.tags or []) + [c.name, c.issuer],
     )
-    publications = _rank_entries(
-        list(library.publications),
+    certifications = [cert_lookup.get((c.name or "").lower(), c) for c in certs_ranked]
+
+    pubs_ranked = _rank_entries(
+        list(original_library.publications),
         jd_terms,
         lambda p: list(p.tags or []) + [p.title, p.venue],
     )
+    publications = [pub_lookup.get((p.title or "").lower(), p) for p in pubs_ranked]
 
     # ---- Skills groups: tailor per JD.
     # First try LLM-driven tailoring (reorders + filters items per JD).
