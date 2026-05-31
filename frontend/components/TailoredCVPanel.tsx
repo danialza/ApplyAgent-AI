@@ -146,6 +146,19 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
     }
   }
 
+  async function switchLLMModel(model: string) {
+    if (!model.trim()) return;
+    setLlmChecking(true);
+    try {
+      const { setLLMModel } = await import("@/lib/api");
+      setLlmStatus(await setLLMModel(model.trim()));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Model switch failed.");
+    } finally {
+      setLlmChecking(false);
+    }
+  }
+
   async function handleDownloadTemplate() {
     try {
       const { filename, content } = await fetchCVTemplate();
@@ -339,6 +352,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
         checking={llmChecking}
         onRecheck={refreshLLMStatus}
         onSwitch={switchLLMProvider}
+        onSwitchModel={switchLLMModel}
       />
 
       {/* Library status header */}
@@ -778,12 +792,22 @@ function LLMStatusBanner({
   checking,
   onRecheck,
   onSwitch,
+  onSwitchModel,
 }: {
   status: LLMStatus | null;
   checking: boolean;
   onRecheck: () => void;
   onSwitch: (p: "claude_code" | "anthropic" | "openai") => void;
+  onSwitchModel: (m: string) => void;
 }) {
+  // Known models per provider — fetched lazily on first render.
+  const [models, setModels] = useState<Record<string, string[]>>({});
+  useEffect(() => {
+    import("@/lib/api").then(({ fetchKnownModels }) =>
+      fetchKnownModels().then(setModels).catch(() => undefined)
+    );
+  }, []);
+  const providerModels = (status?.provider && models[status.provider]) || [];
   let tone = "slate";
   let label = "LLM status: checking…";
   let detail = "";
@@ -848,6 +872,32 @@ function LLMStatusBanner({
             <option value="claude_code">Claude SDK (Pro) — headless unsupported</option>
           )}
         </select>
+        {/* Model dropdown — known IDs per provider + free-text. */}
+        {providerModels.length > 0 && (
+          <select
+            value={status?.model || ""}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val === "__custom__") {
+                const m = prompt("Enter model ID (e.g. claude-sonnet-4-7-preview):", status?.model || "");
+                if (m && m.trim()) onSwitchModel(m.trim());
+              } else if (val) {
+                onSwitchModel(val);
+              }
+            }}
+            disabled={checking}
+            className="rounded-md border border-current/30 bg-white px-1.5 py-1 text-xs font-medium disabled:opacity-50"
+            title="Switch model. Custom = type any ID for unreleased/preview models."
+          >
+            {!providerModels.includes(status?.model || "") && status?.model && (
+              <option value={status.model}>{status.model} (current)</option>
+            )}
+            {providerModels.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+            <option value="__custom__">Custom…</option>
+          </select>
+        )}
         <button
           type="button"
           onClick={onRecheck}

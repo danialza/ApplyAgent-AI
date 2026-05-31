@@ -212,6 +212,57 @@ def delete_library(db: Session = Depends(get_db)) -> None:
     db.commit()
 
 
+@router.post("/llm-model")
+def set_llm_model(payload: dict) -> dict:
+    """Switch the active LLM model at runtime.
+
+    Body: ``{"model": "claude-sonnet-4-5"}``. Sets the right env var
+    for the active provider (ANTHROPIC_MODEL for anthropic,
+    LLM_MODEL_NAME for openai). Returns updated llm_status.
+    """
+    import os as _os
+    model = (payload or {}).get("model", "").strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="model required.")
+    # Route by detected provider — set the matching env so next
+    # _config() call picks it up.
+    provider = (_os.getenv("LLM_PROVIDER") or "").strip().lower()
+    if provider == "anthropic" or model.startswith("claude-"):
+        _os.environ["ANTHROPIC_MODEL"] = model
+    elif provider == "openai" or model.startswith(("gpt-", "o1-", "o3-")):
+        _os.environ["LLM_MODEL_NAME"] = model
+    else:
+        _os.environ["ANTHROPIC_MODEL"] = model
+        _os.environ["LLM_MODEL_NAME"] = model
+    return llm_status()
+
+
+# Known model IDs the UI dropdown offers. Free-text input still
+# allowed via the API for unreleased / private models.
+_KNOWN_MODELS = {
+    "anthropic": [
+        "claude-opus-4-6",
+        "claude-opus-4-5",
+        "claude-sonnet-4-6",
+        "claude-sonnet-4-5",
+        "claude-haiku-4-5",
+    ],
+    "openai": [
+        "gpt-5",
+        "gpt-5-mini",
+        "gpt-4o",
+        "gpt-4o-mini",
+        "o3-mini",
+    ],
+}
+
+
+@router.get("/llm-models")
+def list_llm_models() -> dict:
+    """Return known model IDs per provider for the UI dropdown."""
+    return _KNOWN_MODELS
+
+
 @router.post("/llm-provider")
 def set_llm_provider(payload: dict) -> dict:
     """Switch the active LLM provider at runtime.

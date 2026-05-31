@@ -212,6 +212,20 @@ export async function setLLMProvider(
   return handle<LLMStatus>(res);
 }
 
+export async function setLLMModel(model: string): Promise<LLMStatus> {
+  const res = await fetch(`${API_BASE}/api/cv/llm-model`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
+  return handle<LLMStatus>(res);
+}
+
+export async function fetchKnownModels(): Promise<Record<string, string[]>> {
+  const res = await fetch(`${API_BASE}/api/cv/llm-models`, { cache: "no-store" });
+  return handle<Record<string, string[]>>(res);
+}
+
 export async function putCVLibrary(payload: Omit<CVLibrary, "id" | "updated_at">): Promise<CVLibrary> {
   const res = await fetch(`${API_BASE}/api/cv/library`, {
     method: "PUT",
