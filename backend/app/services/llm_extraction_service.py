@@ -420,13 +420,20 @@ def _chat_completion_anthropic(
         last = dict(chat_messages[-1])
         last["content"] = (
             (last.get("content") or "")
-            + "\n\nRespond with valid JSON only. No markdown, no prose."
+            + "\n\nRespond with valid JSON only. No markdown, no prose. "
+              "Start your response with `{` and end with `}`."
         )
         chat_messages = chat_messages[:-1] + [last]
-        # Pre-fill the assistant turn with `{` so the model continues mid-
-        # JSON. We strip the prefill back on the response.
-        prefill = "{"
-        chat_messages = chat_messages + [{"role": "assistant", "content": prefill}]
+        # Pre-fill the assistant turn with `{` for older models only.
+        # Sonnet 4.6+ rejects assistant-prefill (must end with user
+        # message). _coerce_json downstream tolerates either form.
+        model_id = (cfg.get("model") or "").lower()
+        supports_prefill = not any(
+            tag in model_id for tag in ("sonnet-4-6", "sonnet-4-7", "opus-4-6", "opus-4-7")
+        )
+        if supports_prefill:
+            prefill = "{"
+            chat_messages = chat_messages + [{"role": "assistant", "content": prefill}]
 
     url = f"{cfg['base_url']}/messages"
     headers = {
