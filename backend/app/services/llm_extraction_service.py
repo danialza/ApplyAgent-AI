@@ -429,7 +429,11 @@ def _chat_completion_anthropic(
         # message). _coerce_json downstream tolerates either form.
         model_id = (cfg.get("model") or "").lower()
         supports_prefill = not any(
-            tag in model_id for tag in ("sonnet-4-6", "sonnet-4-7", "opus-4-6", "opus-4-7")
+            tag in model_id for tag in (
+                "sonnet-4-6", "sonnet-4-7", "sonnet-4-8",
+                "opus-4-6", "opus-4-7", "opus-4-8",
+                "haiku-4-6", "haiku-4-7",
+            )
         )
         if supports_prefill:
             prefill = "{"
@@ -445,8 +449,15 @@ def _chat_completion_anthropic(
         "model": cfg["model"],
         "max_tokens": ANTHROPIC_MAX_TOKENS,
         "messages": chat_messages,
-        "temperature": 0.1,
     }
+    # Opus 4.7+ deprecated `temperature` (error: '`temperature` is
+    # deprecated for this model.'). Only add it for older models.
+    deprecates_temp = any(
+        tag in (cfg.get("model") or "").lower()
+        for tag in ("opus-4-7", "opus-4-8", "opus-4-9", "opus-5")
+    )
+    if not deprecates_temp:
+        payload["temperature"] = 0.1
     if system_parts:
         payload["system"] = "\n\n".join(system_parts)
 
