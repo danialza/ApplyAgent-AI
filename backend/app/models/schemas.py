@@ -546,6 +546,13 @@ class RenderCVRequest(BaseModel):
     # `max_boost_iterations` times. Set target=0 to disable.
     target_keyword_coverage: float = Field(default=0.80, ge=0.0, le=1.0)
     max_boost_iterations: int = Field(default=3, ge=0, le=5)
+    # Enhance mode — when on, polish layer is allowed to stretch:
+    # add JD-relevant skills not already in the library, expand
+    # project descriptions with plausible details, and lightly rewrite
+    # Professional Experience bullets even when the JD wording isn't
+    # in the original library. Default OFF to preserve career-ops
+    # "never invent" guarantee.
+    enhance_tailor: bool = False
 
 
 class RenderCVResponse(BaseModel):

@@ -560,7 +560,9 @@ def render_tailored_cv(
     # LLM layer is configured. Failure here is non-fatal; we fall back to
     # the rule-based renderer with the original library.
     if payload.use_llm:
-        polished, _bold_keywords, skip = polish_library_with_llm(library_out, job)
+        polished, _bold_keywords, skip = polish_library_with_llm(
+            library_out, job, enhance=bool(getattr(payload, "enhance_tailor", False))
+        )
         if polished is not None:
             library_out = polished
             used_llm = True

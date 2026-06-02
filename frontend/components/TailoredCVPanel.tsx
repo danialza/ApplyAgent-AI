@@ -53,6 +53,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
   // disabled server-side, the render still succeeds (rule-based fallback)
   // and llm_skip_reason explains the gap in the error banner.
   const [useLlm, setUseLlm] = useState(true);
+  const [enhanceTailor, setEnhanceTailor] = useState(false);
   // Coverage auto-boost target. Renderer loops the LLM up to 3 times
   // weaving missing JD keywords into existing bullets until coverage
   // hits this fraction (or the loop stalls).
@@ -281,6 +282,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
         min_competency_rating: 1,
         target_length: targetLength,
         target_keyword_coverage: coverageTarget,
+        enhance_tailor: enhanceTailor,
       });
       setResult(data);
       if (data.compile_error && !data.compiled) {
@@ -624,6 +626,21 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
             className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
           />
           Polish with LLM
+        </label>
+        <label
+          className={`flex items-center gap-2 text-xs font-medium ${
+            enhanceTailor ? "text-amber-700" : "text-slate-600"
+          }`}
+          title="ENHANCE mode — lets the LLM add JD-relevant skills the library doesn't list, expand project bullets, and rewrite experience bullets more freely. Trade-off: higher JD-fit, higher fabrication risk. Off by default. Requires Polish with LLM."
+        >
+          <input
+            type="checkbox"
+            checked={enhanceTailor}
+            disabled={!useLlm}
+            onChange={(e) => setEnhanceTailor(e.target.checked)}
+            className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+          />
+          Enhance tailor ⚠
         </label>
         <label
           className="flex items-center gap-2 text-xs font-medium text-slate-600"

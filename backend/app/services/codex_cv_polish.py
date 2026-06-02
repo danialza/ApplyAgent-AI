@@ -43,12 +43,20 @@ class _LLMExperienceRewrite(BaseModel):
     highlights: list[str] = Field(default_factory=list)
 
 
+class _LLMSkillGroupRewrite(BaseModel):
+    label: str
+    items: list[str] = Field(default_factory=list)
+
+
 class _LLMPolish(BaseModel):
     summary: str = ""
     bold_keywords: list[str] = Field(default_factory=list)
     selected_projects: list[_LLMProjectRewrite] = Field(default_factory=list)
     additional_projects: list[_LLMProjectRewrite] = Field(default_factory=list)
     experience: list[_LLMExperienceRewrite] = Field(default_factory=list)
+    # Enhance-mode only: extra skill groups the LLM proposes to merge
+    # into the rendered Skills section. Ignored in strict mode.
+    extra_skills: list[_LLMSkillGroupRewrite] = Field(default_factory=list)
 
 
 # ---------- Prompts ----------
@@ -168,6 +176,115 @@ CANDIDATE LIBRARY (JSON):
 """
 
 
+# ---------- Enhance-mode prompts ----------
+#
+# Enhance mode loosens the "never invent" rule. The LLM may:
+#   * Add JD-relevant skills the library doesn't already list, when
+#     they're plausibly inferable from the candidate's projects.
+#   * Expand project descriptions with additional bullets / detail
+#     drawn from JD vocabulary, anchored on the project's actual stack.
+#   * Lightly rewrite Professional Experience bullets to weave in JD
+#     terminology even when the original wording isn't a direct match.
+#
+# Trade-off: more JD coverage, more fabrication risk. User must opt
+# in via the request flag — default stays OFF.
+_ENHANCE_SYSTEM = (
+    "You are a senior CV editor in ENHANCE mode. Your job: aggressively "
+    "tailor ONE CV to ONE job description, maximising keyword coverage "
+    "and JD-fit. "
+    "ENHANCE RULES: "
+    "(1) You MAY add skills, tools, frameworks, and techniques that the "
+    "candidate's projects plausibly imply — even if not explicitly listed "
+    "in the library — provided they are reasonable inferences from the "
+    "project's stack or domain. Do NOT invent employers, dates, degrees, "
+    "or company names. "
+    "(2) You MAY expand project bullets with additional detail anchored "
+    "on the project's actual technology stack. You MAY also CHANGE the "
+    "bullet count per project (add up to 2 new bullets, or trim weak "
+    "ones) to better fit the JD. "
+    "(3) You MAY lightly rewrite Professional Experience bullets to "
+    "weave in JD vocabulary, even when the original library wording "
+    "isn't a direct match — but the role's core function must stay "
+    "truthful. Keep bullet count flexible (±1 bullet allowed). "
+    "(4) You MAY propose `extra_skills` — new skill groups (or items to "
+    "append to existing groups) the rendered CV should display. "
+    "(5) Output STRICT JSON — no markdown fences, no prose, no comments. "
+    "First char `{`, last char `}`. "
+    "(6) NO RECYCLED FLUFF. Banned across multiple bullets: "
+    "'production-grade', 'secure, scalable', 'intelligent insights', "
+    "'enterprise-ready', 'at scale'. Concrete language always wins. "
+    "(7) Every bullet must anchor on a concrete signal: a named tool, "
+    "a measurable outcome, a named system, or a domain-specific verb. "
+    "(8) WRITE NATURAL PROSE. Avoid hyphen-chain modifiers ('CLIP-style', "
+    "'PaliGemma-inspired') — use natural phrasing."
+)
+
+_ENHANCE_USER_TEMPLATE = """\
+TAILOR THIS CV AGGRESSIVELY TO THIS JOB. You are in ENHANCE mode — you
+may add plausible skills, expand projects, and tweak experience bullets
+to maximise JD-fit. Run this pipeline:
+
+  STEP 1 — Extract 20-25 canonical keywords from the JD (skills + tools
+           + role terms + domain nouns). Use exact JD form.
+  STEP 2 — Detect archetype from JD keyword density. Open the rewritten
+           Summary with the EXACT archetype noun phrase from the JD.
+  STEP 3 — Rewrite the Professional Summary in 3-5 lines, no first-
+           person pronouns. Thread in top 7-8 JD keywords. End with
+           what the candidate ships / builds / improves.
+  STEP 4 — For each project: reorder JD-relevant bullets to front,
+           reword using JD vocab, AND add up to 2 new bullets that
+           anchor on the project's actual stack but bring in JD
+           terminology the original bullets missed. You may also trim
+           weak bullets. Bullet count is FLEXIBLE per project.
+  STEP 5 — For each experience entry: reorder + lightly rewrite bullets
+           to weave in JD vocab. Bullet count flexible (±1).
+  STEP 6 — extra_skills: propose skill groups to ADD to the rendered
+           Skills section. Either new groups (label + items) or items
+           to append to a group label that already exists in the
+           library. Only skills that are plausibly grounded in the
+           candidate's projects or domain.
+  STEP 7 — bold_keywords: canonical skill/role nouns that appear in
+           your rewritten text AND in the JD. The renderer wraps these
+           in \\textbf{{}}.
+  STEP 8 — Self-check:
+             * No new employers/companies/degrees/dates introduced.
+             * Output is a valid JSON object.
+             * Title (and company) match library EXACTLY (case + spacing).
+
+OUTPUT SCHEMA (all keys required; empty arrays when nothing applies):
+
+{{
+  "summary": "<rewritten Professional Summary, 3-5 lines>",
+  "bold_keywords": ["Python", "RAG", "FastAPI", "..."],
+  "selected_projects": [
+    {{ "title": "<EXACT title>", "highlights": ["<bullet 1>", "<bullet 2>", "<bullet 3>"] }}
+  ],
+  "additional_projects": [
+    {{ "title": "<EXACT title>", "highlights": ["..."] }}
+  ],
+  "experience": [
+    {{
+      "title": "<EXACT title>",
+      "company": "<EXACT company>",
+      "highlights": ["<bullet 1>", "<bullet 2>"]
+    }}
+  ],
+  "extra_skills": [
+    {{ "label": "Languages", "items": ["Rust", "Go"] }},
+    {{ "label": "MLOps", "items": ["MLflow", "Kubeflow"] }}
+  ]
+}}
+
+JOB DESCRIPTION:
+\"\"\"
+{job}
+\"\"\"
+
+CANDIDATE LIBRARY (JSON):
+{library_json}
+"""
+
+
 # ---------- Validators ----------
 
 _ALLOWED_LEN_RATIO = (0.4, 2.0)  # rewritten bullet must be within 40%-200% of original length
@@ -193,19 +310,29 @@ def _scrub_bold_keywords(
     candidate: list[str],
     library: CVLibraryOut,
     job: JobParsed | None,
+    enhance: bool = False,
 ) -> list[str]:
-    """Drop keywords that aren't grounded in the library or the JD."""
+    """Drop keywords that aren't grounded in the library or the JD.
+
+    Enhance mode: JD-only grounding is accepted (the LLM is allowed to
+    surface JD skills the library didn't originally list).
+    """
     grounded: set[str] = set()
     for g in library.skills_groups:
         for s in g.items:
             grounded.add(s.strip().lower())
+    jd_grounded: set[str] = set()
     if job is not None:
         for s in (job.required_skills or []):
-            grounded.add(s.strip().lower())
+            jd_grounded.add(s.strip().lower())
         for s in (job.preferred_skills or []):
-            grounded.add(s.strip().lower())
+            jd_grounded.add(s.strip().lower())
         for s in (job.technologies or []):
-            grounded.add(s.strip().lower())
+            jd_grounded.add(s.strip().lower())
+    if enhance:
+        grounded |= jd_grounded
+    else:
+        grounded |= jd_grounded
     out: list[str] = []
     seen: set[str] = set()
     for k in candidate or []:
@@ -215,7 +342,6 @@ def _scrub_bold_keywords(
         kl = k.lower()
         if kl in seen:
             continue
-        # Accept if any grounded term is substring-equal or word-overlap.
         if any(kl == g or kl in g or g in kl for g in grounded):
             seen.add(kl)
             out.append(k)
@@ -227,6 +353,7 @@ def _scrub_bold_keywords(
 def polish_library_with_llm(
     library: CVLibraryOut,
     job: JobParsed | None,
+    enhance: bool = False,
 ) -> tuple[CVLibraryOut | None, list[str], str]:
     """Return (polished_library, bold_keywords, error_reason).
 
@@ -242,9 +369,11 @@ def polish_library_with_llm(
     # Build the prompt body. Library JSON is sent verbatim — small file,
     # fits comfortably in any model's context.
     library_json = library.model_dump_json(exclude={"id", "updated_at"})
+    sys_prompt = _ENHANCE_SYSTEM if enhance else _SYSTEM
+    user_tpl = _ENHANCE_USER_TEMPLATE if enhance else _USER_TEMPLATE
     messages = [
-        {"role": "system", "content": _SYSTEM},
-        {"role": "user", "content": _USER_TEMPLATE.format(
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": user_tpl.format(
             job=(job.raw_text or "").strip()[:6000],
             library_json=library_json,
         )},
@@ -273,17 +402,48 @@ def polish_library_with_llm(
     if polished.summary.strip():
         merged.summary = polished.summary.strip()
 
-    _merge_projects(merged.selected_projects, polished.selected_projects, "selected_projects")
-    _merge_projects(merged.additional_projects, polished.additional_projects, "additional_projects")
-    _merge_experience(merged.experience, polished.experience)
+    _merge_projects(merged.selected_projects, polished.selected_projects, "selected_projects", enhance=enhance)
+    _merge_projects(merged.additional_projects, polished.additional_projects, "additional_projects", enhance=enhance)
+    _merge_experience(merged.experience, polished.experience, enhance=enhance)
 
-    bold_keywords = _scrub_bold_keywords(polished.bold_keywords, library, job)
+    if enhance and polished.extra_skills:
+        _merge_extra_skills(merged.skills_groups, polished.extra_skills)
+
+    bold_keywords = _scrub_bold_keywords(polished.bold_keywords, library, job, enhance=enhance)
     return merged, bold_keywords, ""
+
+
+def _merge_extra_skills(library_groups: list, extras: list[_LLMSkillGroupRewrite]) -> None:
+    """Append items to existing labelled groups, or add new groups.
+
+    De-dupes case-insensitively within each group.
+    """
+    by_label = {(g.label or "").strip().lower(): g for g in library_groups}
+    for extra in extras:
+        label = (extra.label or "").strip()
+        if not label:
+            continue
+        items = [i.strip() for i in extra.items if i and i.strip()]
+        if not items:
+            continue
+        target = by_label.get(label.lower())
+        if target is None:
+            # New group — append to library_groups in place.
+            from app.models.schemas import SkillGroup  # local import: avoid cycle
+            ng = SkillGroup(label=label, items=items)
+            library_groups.append(ng)
+            by_label[label.lower()] = ng
+            continue
+        existing_lower = {i.strip().lower() for i in target.items}
+        for it in items:
+            if it.lower() not in existing_lower:
+                target.items.append(it)
+                existing_lower.add(it.lower())
 
 
 # ---------- Merge helpers ----------
 
-def _merge_projects(library_entries: list, llm_entries: list[_LLMProjectRewrite], where: str) -> None:
+def _merge_projects(library_entries: list, llm_entries: list[_LLMProjectRewrite], where: str, enhance: bool = False) -> None:
     by_title = {p.title.strip().lower(): p for p in library_entries}
     for rewrite in llm_entries:
         key = (rewrite.title or "").strip().lower()
@@ -292,6 +452,15 @@ def _merge_projects(library_entries: list, llm_entries: list[_LLMProjectRewrite]
             logger.info("CV polish: project '%s' (in %s) not found in library; skipping",
                          rewrite.title, where)
             continue
+        rewritten = [h.strip() for h in rewrite.highlights if h and h.strip()]
+        if not rewritten:
+            continue
+        if enhance:
+            # Enhance mode — accept any non-empty bullet list, only
+            # guarding against runaway counts (cap at original + 2).
+            cap = max(1, len(target.highlights)) + 2
+            target.highlights = rewritten[:cap]
+            continue
         if not _bullets_compatible(target.highlights, rewrite.highlights):
             logger.info("CV polish: project '%s' bullets incompatible (count/length); keeping originals",
                          rewrite.title)
@@ -299,7 +468,7 @@ def _merge_projects(library_entries: list, llm_entries: list[_LLMProjectRewrite]
         target.highlights = list(rewrite.highlights)
 
 
-def _merge_experience(library_entries: list, llm_entries: list[_LLMExperienceRewrite]) -> None:
+def _merge_experience(library_entries: list, llm_entries: list[_LLMExperienceRewrite], enhance: bool = False) -> None:
     def k(title: str, company: str) -> str:
         return f"{(title or '').strip().lower()}|{(company or '').strip().lower()}"
 
@@ -316,6 +485,13 @@ def _merge_experience(library_entries: list, llm_entries: list[_LLMExperienceRew
         if target is None:
             logger.info("CV polish: experience '%s @ %s' not found; skipping",
                          rewrite.title, rewrite.company)
+            continue
+        rewritten = [h.strip() for h in rewrite.highlights if h and h.strip()]
+        if not rewritten:
+            continue
+        if enhance:
+            cap = max(1, len(target.highlights)) + 1
+            target.highlights = rewritten[:cap]
             continue
         if not _bullets_compatible(target.highlights, rewrite.highlights):
             logger.info("CV polish: experience '%s' bullets incompatible; keeping originals",

@@ -408,6 +408,9 @@ export interface RenderCVRequest {
   target_keyword_coverage?: number;
   /** Max boost rounds. 0 disables. */
   max_boost_iterations?: number;
+  /** Enhance mode — allow LLM to add JD-relevant skills, expand
+   *  project bullets, and rewrite experience bullets more freely. */
+  enhance_tailor?: boolean;
 }
 
 export interface SectionPlanOut {
