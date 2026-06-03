@@ -57,6 +57,13 @@ def validate_action(kind: str, payload: dict) -> None:
     elif kind == "set_header_field":
         if not (payload.get("field") or "").strip():
             raise ValueError("field required")
+    elif kind == "add_entry":
+        if payload.get("section") not in SECTIONS:
+            raise ValueError(f"bad section: {payload.get('section')!r}")
+        if not isinstance(payload.get("entry"), dict):
+            raise ValueError("entry must be dict")
+        if not (payload["entry"].get("title") or "").strip():
+            raise ValueError("entry.title required")
     else:
         raise ValueError(f"unknown kind: {kind!r}")
 
@@ -110,6 +117,26 @@ def apply_action(row, kind: str, payload: dict) -> None:
         header = dict(getattr(row, "header", None) or {})
         header[field] = value
         row.header = header
+    elif kind == "add_entry":
+        section = payload["section"]
+        entry = dict(payload["entry"])
+        position = payload.get("position", "end")
+        lst = list(getattr(row, section, None) or [])
+        # Dedup by title (case-insensitive) — replay-safe.
+        new_title = (entry.get("title") or "").strip().lower()
+        existing_titles = {
+            (e.get("title") or "").strip().lower() if isinstance(e, dict) else ""
+            for e in lst
+        }
+        if new_title and new_title in existing_titles:
+            return  # already present — silent no-op
+        if position == "start":
+            lst.insert(0, entry)
+        elif isinstance(position, int) and 0 <= position <= len(lst):
+            lst.insert(position, entry)
+        else:
+            lst.append(entry)
+        setattr(row, section, lst)
     else:
         raise ValueError(f"unknown kind: {kind!r}")
 

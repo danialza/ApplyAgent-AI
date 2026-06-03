@@ -187,6 +187,77 @@ def apply_fix(payload: dict, db: Session = Depends(get_db)) -> CVLibraryOut:
     return _to_out(row)
 
 
+@router.post("/library/add-project", response_model=CVLibraryOut)
+def add_project(payload: dict, db: Session = Depends(get_db)) -> CVLibraryOut:
+    """Enrich + append a project to the master library.
+
+    Body:
+      {
+        "title": str (required),
+        "url": str (optional, GitHub/paper/demo/web),
+        "period": str (optional),
+        "notes": str (optional, free-form prose),
+        "tag_hints": [str] (optional),
+        "section": "selected_projects" | "additional_projects"
+                   (default: selected_projects),
+        "position": "end" | "start" | int (default: end),
+        "jd_text": str (optional — bias bullets toward this JD)
+      }
+
+    Persists as an ``add_entry`` patch so source-rebuilds replay it.
+    """
+    from app.services.project_enricher import enrich_project
+    from app.services.user_patches import apply_action, validate_action
+
+    p = payload or {}
+    title = (p.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title required")
+    section = (p.get("section") or "selected_projects").strip()
+    if section not in ("selected_projects", "additional_projects"):
+        raise HTTPException(
+            status_code=400,
+            detail="section must be selected_projects or additional_projects",
+        )
+
+    row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No library.")
+
+    entry, fetched_url, enrich_err = enrich_project(
+        title=title,
+        url=(p.get("url") or "").strip(),
+        period=(p.get("period") or "").strip(),
+        notes=(p.get("notes") or "").strip(),
+        tag_hints=list(p.get("tag_hints") or []),
+        jd_text=(p.get("jd_text") or "").strip(),
+    )
+
+    patch_payload = {
+        "section": section,
+        "entry": entry.model_dump(),
+        "position": p.get("position", "end"),
+    }
+    try:
+        validate_action("add_entry", patch_payload)
+        apply_action(row, "add_entry", patch_payload)
+    except (ValueError, IndexError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Apply failed: {exc}") from exc
+
+    patches = list(getattr(row, "user_patches", None) or [])
+    patches.append({"kind": "add_entry", "payload": patch_payload})
+    row.user_patches = patches
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    if enrich_err:
+        import logging as _log
+        _log.getLogger("ai_job_cv_matcher.cv_render_routes").info(
+            "add-project enrichment note: %s", enrich_err
+        )
+    return _to_out(row)
+
+
 @router.post("/library/unlock", response_model=CVLibraryOut)
 def unlock_library(db: Session = Depends(get_db)) -> CVLibraryOut:
     """Clear the manual-edit lock. Library content stays the same

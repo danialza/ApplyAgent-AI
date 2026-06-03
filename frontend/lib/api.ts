@@ -349,6 +349,24 @@ export async function applyLibraryFix(action: {
   return handle(res);
 }
 
+export async function addLibraryProject(input: {
+  title: string;
+  url?: string;
+  period?: string;
+  notes?: string;
+  tag_hints?: string[];
+  section?: "selected_projects" | "additional_projects";
+  position?: "end" | "start" | number;
+  jd_text?: string;
+}): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/cv/library/add-project`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return handle(res);
+}
+
 export async function unlockLibrary(): Promise<any> {
   const res = await fetch(`${API_BASE}/api/cv/library/unlock`, { method: "POST" });
   return handle(res);

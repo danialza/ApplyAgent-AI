@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  addLibraryProject,
   applyLibraryFix,
   fetchCVLibrary,
   fetchLibraryIssues,
@@ -395,6 +396,8 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
         </details>
       )}
 
+      <AddProjectCard onAdded={() => window.location.reload()} />
+
       {/* Entry sections — collapsible, per-entry source chips + delete.
           Delete posts a drop_entry user-patch (survives rebuilds). */}
       <EntryList
@@ -545,5 +548,147 @@ function SourceChip({ sourceKey, label }: { sourceKey: string; label: string }) 
     >
       {label}
     </span>
+  );
+}
+
+
+/** Form to add a single project. Posts to /library/add-project — the
+ *  backend pulls the URL (GitHub repo / web / paper), runs an LLM
+ *  enricher, and persists the result as an add_entry user-patch so
+ *  the project survives master rebuilds. */
+function AddProjectCard({ onAdded }: { onAdded: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [url, setUrl] = useState("");
+  const [period, setPeriod] = useState("");
+  const [notes, setNotes] = useState("");
+  const [tagHints, setTagHints] = useState("");
+  const [section, setSection] = useState<"selected_projects" | "additional_projects">(
+    "selected_projects"
+  );
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    setErr(null);
+    if (!title.trim()) {
+      setErr("Title required");
+      return;
+    }
+    setBusy(true);
+    try {
+      await addLibraryProject({
+        title: title.trim(),
+        url: url.trim(),
+        period: period.trim(),
+        notes: notes.trim(),
+        tag_hints: tagHints
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        section,
+      });
+      onAdded();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Add failed");
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-2 text-xs">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="font-semibold text-brand-700 hover:text-brand-900"
+        >
+          + Add project (paste link, LLM fills the rest)
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-brand-200 bg-brand-50 p-3 text-xs">
+      <div className="flex items-center justify-between">
+        <span className="font-semibold text-brand-800">Add project</span>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="text-slate-500 hover:text-slate-800"
+        >
+          ✕
+        </button>
+      </div>
+      <input
+        type="text"
+        placeholder="Title* (e.g. Patina — iOS AR Companion)"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        className="w-full rounded border border-slate-300 px-2 py-1"
+      />
+      <input
+        type="url"
+        placeholder="Link (GitHub repo / paper / demo / site)"
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        className="w-full rounded border border-slate-300 px-2 py-1"
+      />
+      <div className="flex gap-2">
+        <input
+          type="text"
+          placeholder="Period (e.g. Jan 2025 – Mar 2025)"
+          value={period}
+          onChange={(e) => setPeriod(e.target.value)}
+          className="flex-1 rounded border border-slate-300 px-2 py-1"
+        />
+        <select
+          value={section}
+          onChange={(e) =>
+            setSection(
+              e.target.value as "selected_projects" | "additional_projects"
+            )
+          }
+          className="rounded border border-slate-300 bg-white px-2 py-1"
+        >
+          <option value="selected_projects">Selected</option>
+          <option value="additional_projects">Additional</option>
+        </select>
+      </div>
+      <textarea
+        placeholder="Notes — free-form prose. What did it do, what stack, what outcome. The LLM mines this + the URL for bullets."
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        rows={4}
+        className="w-full rounded border border-slate-300 px-2 py-1"
+      />
+      <input
+        type="text"
+        placeholder="Tag hints (comma-separated, e.g. VLA, MuJoCo, RL)"
+        value={tagHints}
+        onChange={(e) => setTagHints(e.target.value)}
+        className="w-full rounded border border-slate-300 px-2 py-1"
+      />
+      {err && <div className="text-red-600">{err}</div>}
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          disabled={busy}
+          className="rounded border border-slate-300 bg-white px-3 py-1 font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={busy || !title.trim()}
+          className="rounded bg-brand-600 px-3 py-1 font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
+        >
+          {busy ? "Enriching…" : "Generate + Add"}
+        </button>
+      </div>
+    </div>
   );
 }
