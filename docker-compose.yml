@@ -44,6 +44,10 @@ services:
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
       LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
       LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+      LATEX_COMPILE_TIMEOUT_SECONDS: ${LATEX_COMPILE_TIMEOUT_SECONDS:-180}
+      # Persist tectonic's downloaded LaTeX packages across container
+      # rebuilds so cold first compile (~30-90s) only happens once.
+      XDG_CACHE_HOME: /data/tectonic_cache
 
       # Embeddings — model is downloaded into HF_HOME on first run.
       APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}

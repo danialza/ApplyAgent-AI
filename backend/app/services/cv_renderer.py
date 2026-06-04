@@ -978,12 +978,23 @@ def _compile_pdf(latex: str) -> tuple[bytes | None, str]:
         tex_path = tmp_path / "cv.tex"
         tex_path.write_text(latex, encoding="utf-8")
 
+        # Tunable per-compile timeout. Tectonic's cold first run on a
+        # fresh container fetches packages on demand (~30-90s); after
+        # that the cache (XDG_CACHE_HOME, see docker-compose) makes it
+        # ~5-10s. Default 180s gives the cold path headroom without
+        # letting a runaway compile block the request indefinitely.
+        import os as _os
+        try:
+            compile_timeout = int(_os.environ.get("LATEX_COMPILE_TIMEOUT_SECONDS", "180"))
+        except ValueError:
+            compile_timeout = 180
+
         try:
             if kind == "tectonic":
                 proc = subprocess.run(
                     ["tectonic", "--outdir", str(tmp_path), "--keep-logs",
                      "--chatter", "minimal", str(tex_path)],
-                    capture_output=True, text=True, timeout=60,
+                    capture_output=True, text=True, timeout=compile_timeout,
                 )
             else:
                 # pdflatex twice for cross-references; CVs rarely need it,
@@ -992,10 +1003,10 @@ def _compile_pdf(latex: str) -> tuple[bytes | None, str]:
                     proc = subprocess.run(
                         ["pdflatex", "-interaction=nonstopmode",
                          "-output-directory", str(tmp_path), str(tex_path)],
-                        capture_output=True, text=True, timeout=60,
+                        capture_output=True, text=True, timeout=compile_timeout,
                     )
         except subprocess.TimeoutExpired:
-            return None, "LaTeX compilation timed out (>60s)."
+            return None, f"LaTeX compilation timed out (>{compile_timeout}s)."
         except Exception as exc:  # noqa: BLE001
             return None, f"LaTeX compilation failed to launch: {exc}"
 
