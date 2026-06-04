@@ -250,9 +250,24 @@ def check_duplicate(
                 application=_to_out(row),
             )
 
-    # 3. Company + role fuzzy (lower-case, trimmed).
+    # 3. Company + role fuzzy (lower-case, trimmed). When the caller
+    # didn't supply them explicitly, derive from `jd_text` via the
+    # existing extractor — frontend currently passes only jd_text+url,
+    # so this is the path that catches re-pastes of the same JD whose
+    # raw text differs by a few characters (LinkedIn promo blocks,
+    # cookie banners, etc.) and therefore misses jd_hash match.
     cl = company.strip().lower()
     rl = role.strip().lower()
+    if (not cl or not rl) and (jd_text or "").strip():
+        try:
+            from app.services.extraction import extract_job
+            parsed = extract_job(jd_text)
+            if not cl:
+                cl = (parsed.company or "").strip().lower()
+            if not rl:
+                rl = (parsed.job_title or "").strip().lower()
+        except Exception:  # noqa: BLE001
+            pass
     if cl and rl:
         rows = db.query(Application).all()
         for r in rows:
@@ -262,6 +277,29 @@ def check_duplicate(
                     match_kind="company_role",
                     application=_to_out(r),
                 )
+        # Last-ditch: company match alone with fuzzy role overlap
+        # (token-set Jaccard ≥ 0.6). Catches casing/word-order drift
+        # like "Graduate AI Software Engineer" vs "Graduate AI software
+        # engineer" (already lower-cased above, but also "AI Engineer,
+        # Graduate" etc.).
+        if cl:
+            role_tokens = set(t for t in rl.split() if len(t) > 2)
+            for r in rows:
+                if (r.company or "").strip().lower() != cl:
+                    continue
+                r_tokens = set(
+                    t for t in (r.role or "").strip().lower().split() if len(t) > 2
+                )
+                if not role_tokens or not r_tokens:
+                    continue
+                inter = len(role_tokens & r_tokens)
+                union = len(role_tokens | r_tokens)
+                if union and inter / union >= 0.6:
+                    return ApplicationDuplicateMatch(
+                        matched=True,
+                        match_kind="company_role_fuzzy",
+                        application=_to_out(r),
+                    )
 
     return ApplicationDuplicateMatch(matched=False)
 
