@@ -265,9 +265,36 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
     setBusy(true);
     setResult(null);
     setTrackedForThisRender(false);
-    // Run dedupe check in parallel with render so the warning lands
-    // alongside the result without adding latency.
-    refreshDuplicateCheck(jobText.trim(), extractUrlFromText(jobText) || "");
+    // Dedupe check is now BLOCKING — when the JD is already tracked
+    // we stop and require explicit user confirmation before burning
+    // LLM + LaTeX cycles re-rendering it. Skip the prompt when the
+    // textarea is empty (the check would no-op anyway).
+    const jdt = jobText.trim();
+    const jurl = extractUrlFromText(jobText) || "";
+    if (jdt || jurl) {
+      try {
+        const d = await checkDuplicateApplication({ jd_text: jdt, url: jurl });
+        setDuplicate(d.matched ? d : null);
+        if (d.matched && d.application) {
+          const app = d.application;
+          const ok = confirm(
+            `Already tracked.\n\n` +
+            `${app.role || "(no role)"} @ ${app.company || "(no company)"}\n` +
+            `Added: ${app.apply_date || "?"} · Status: ${app.status || "?"}\n\n` +
+            `Render again anyway?`
+          );
+          if (!ok) {
+            setBusy(false);
+            return;
+          }
+        }
+      } catch {
+        // Dedupe check itself failed — fall through and render rather
+        // than block the user on an advisory check.
+      }
+    } else {
+      setDuplicate(null);
+    }
     try {
       const data = await renderCV({
         job_text: jobText.trim(),
