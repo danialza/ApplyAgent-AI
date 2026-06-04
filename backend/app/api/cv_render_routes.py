@@ -34,6 +34,64 @@ from app.services.cv_renderer import render_cv
 from app.services.cv_section_planner import plan_sections
 from app.services.extraction import extract_job
 
+
+def _target_pages_for(target_length: str) -> int:
+    """Hard page ceiling per length preset. `auto` defaults to 2."""
+    if target_length == "one_page":
+        return 1
+    if target_length == "one_half_page":
+        return 2  # 1.5 floors to a 2-page hard cap
+    return 2  # two_page + auto
+
+
+def _pick_trim_target(
+    library, caps: list[int], min_proj_bullets: int, min_exp_bullets: int
+) -> tuple[str, int] | None:
+    """Return (section_attr, index) of the entry with the most bullets
+    that's still above its floor. Used by the page-fit loop's bullet-
+    trim phase. Returns None when nothing can be trimmed further.
+    """
+    candidates: list[tuple[int, str, int]] = []  # (n_bullets, section, idx)
+    for i, p in enumerate(library.selected_projects[: caps[0]]):
+        n = len(p.highlights or [])
+        if n > min_proj_bullets:
+            candidates.append((n, "selected_projects", i))
+    for i, p in enumerate(library.additional_projects[: caps[1]]):
+        n = len(p.highlights or [])
+        if n > min_proj_bullets:
+            candidates.append((n, "additional_projects", i))
+    for i, x in enumerate(library.experience[: caps[2]]):
+        n = len(x.highlights or [])
+        if n > min_exp_bullets:
+            candidates.append((n, "experience", i))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)  # longest first
+    _, section, idx = candidates[0]
+    return section, idx
+
+
+def _count_pdf_pages_b64(pdf_b64: str) -> int:
+    """Count pages in a base64-encoded PDF. Returns 0 on any failure
+    so the page-fit loop can bail rather than crash."""
+    import base64
+    from io import BytesIO
+    try:
+        raw = base64.b64decode(pdf_b64)
+    except Exception:  # noqa: BLE001
+        return 0
+    # Try pdfminer first (already a dep), then fall back to a byte scan
+    # of `/Type /Page` markers which is approximate but never crashes.
+    try:
+        from pdfminer.pdfpage import PDFPage  # type: ignore
+        return sum(1 for _ in PDFPage.get_pages(BytesIO(raw)))
+    except Exception:  # noqa: BLE001
+        pass
+    # Fallback — count /Type /Page occurrences (also matches /Pages so
+    # subtract those).
+    pages = raw.count(b"/Type /Page") - raw.count(b"/Type /Pages")
+    return max(pages, 1)
+
 router = APIRouter(prefix="/api/cv", tags=["cv"])
 
 
@@ -746,6 +804,66 @@ def render_tailored_cv(
             min_competency_rating=payload.min_competency_rating,
             core_competencies_override=core_competencies_override,
         )
+
+    # ---- Page-fit loop: enforce target_length as a hard page cap.
+    # If the compiled PDF exceeds the user's page target we progressively
+    # reduce (1) section caps, then (2) per-entry bullet counts, and
+    # recompile until it fits or we run out of room.
+    if payload.compile_pdf and result.compiled and result.pdf_b64:
+        target_pages = _target_pages_for(payload.target_length)
+        caps = [
+            plan.max_selected_projects,
+            plan.max_additional_projects,
+            plan.max_experience,
+        ]
+        # Floors keep the CV from collapsing into nothing.
+        min_proj_bullets = 2
+        min_exp_bullets = 1
+        # We deep-copy library each iteration to trim without polluting
+        # the source-of-truth library_out for later steps.
+        from copy import deepcopy
+        trimmed_lib = library_out
+        for _shrink_iter in range(12):
+            pc = _count_pdf_pages_b64(result.pdf_b64)
+            if pc <= target_pages:
+                break
+            # Phase 1: drop section caps cheaply.
+            if caps[1] > 0:
+                caps[1] -= 1
+            elif caps[2] > 1:
+                caps[2] -= 1
+            elif caps[0] > 2:
+                caps[0] -= 1
+            else:
+                # Phase 2: trim the longest bullet list by 1 each round.
+                # Find the entry (selected/additional/experience) with the
+                # most highlights above its floor; drop its trailing
+                # bullet. Stop if no entry can be trimmed further.
+                trimmed_lib = deepcopy(trimmed_lib)
+                trim_target = _pick_trim_target(
+                    trimmed_lib, caps, min_proj_bullets, min_exp_bullets
+                )
+                if trim_target is None:
+                    break
+                section_attr, idx = trim_target
+                section_list = getattr(trimmed_lib, section_attr)
+                section_list[idx].highlights = section_list[idx].highlights[:-1]
+            result = render_cv(
+                trimmed_lib,
+                job=job,
+                max_selected_projects=caps[0],
+                max_additional_projects=caps[1],
+                max_experience=caps[2],
+                compile_pdf=True,
+                min_competency_rating=payload.min_competency_rating,
+                core_competencies_override=core_competencies_override,
+            )
+            if not result.compiled:
+                break
+        # Reflect the final caps the page-fit loop landed on.
+        plan.max_selected_projects = caps[0]
+        plan.max_additional_projects = caps[1]
+        plan.max_experience = caps[2]
 
     # ---- Filename: cv-{first-name-kebab}-{company-kebab}-{YYYY-MM-DD}
     from datetime import date as _date
