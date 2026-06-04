@@ -44,6 +44,14 @@ def _target_pages_for(target_length: str) -> int:
     return 2  # two_page + auto
 
 
+def _split_sentences(text: str) -> list[str]:
+    """Naive sentence splitter (.? !) — used by the page-fit loop's
+    summary truncation phase. Good enough for CV prose."""
+    import re as _re
+    parts = _re.split(r"(?<=[\.\?\!])\s+", (text or "").strip())
+    return [p for p in (s.strip() for s in parts) if p]
+
+
 def _pick_trim_target(
     library, caps: list[int], min_proj_bullets: int, min_exp_bullets: int
 ) -> tuple[str, int] | None:
@@ -807,8 +815,14 @@ def render_tailored_cv(
 
     # ---- Page-fit loop: enforce target_length as a hard page cap.
     # If the compiled PDF exceeds the user's page target we progressively
-    # reduce (1) section caps, then (2) per-entry bullet counts, and
-    # recompile until it fits or we run out of room.
+    # cut content and recompile until it fits or we run out of room.
+    # Phases, cheapest to harshest:
+    #   1. Drop section caps (additional → experience → selected).
+    #   2. Trim trailing bullets per entry (floor 2 per project, 1 per exp).
+    #   3. Trim trailing publications/certifications.
+    #   4. Trim bullets down to floor=1.
+    #   5. Truncate summary to the first two sentences.
+    # Hard ceiling: 20 iterations.
     if payload.compile_pdf and result.compiled and result.pdf_b64:
         target_pages = _target_pages_for(payload.target_length)
         caps = [
@@ -816,38 +830,68 @@ def render_tailored_cv(
             plan.max_additional_projects,
             plan.max_experience,
         ]
-        # Floors keep the CV from collapsing into nothing.
         min_proj_bullets = 2
         min_exp_bullets = 1
-        # We deep-copy library each iteration to trim without polluting
-        # the source-of-truth library_out for later steps.
         from copy import deepcopy
         trimmed_lib = library_out
-        for _shrink_iter in range(12):
+        summary_trimmed = False
+        for _shrink_iter in range(20):
             pc = _count_pdf_pages_b64(result.pdf_b64)
             if pc <= target_pages:
                 break
-            # Phase 1: drop section caps cheaply.
+            cut_applied = False
+            # Phase 1
             if caps[1] > 0:
                 caps[1] -= 1
+                cut_applied = True
             elif caps[2] > 1:
                 caps[2] -= 1
+                cut_applied = True
             elif caps[0] > 2:
                 caps[0] -= 1
-            else:
-                # Phase 2: trim the longest bullet list by 1 each round.
-                # Find the entry (selected/additional/experience) with the
-                # most highlights above its floor; drop its trailing
-                # bullet. Stop if no entry can be trimmed further.
+                cut_applied = True
+            # Phase 2
+            if not cut_applied:
                 trimmed_lib = deepcopy(trimmed_lib)
                 trim_target = _pick_trim_target(
                     trimmed_lib, caps, min_proj_bullets, min_exp_bullets
                 )
-                if trim_target is None:
-                    break
-                section_attr, idx = trim_target
-                section_list = getattr(trimmed_lib, section_attr)
-                section_list[idx].highlights = section_list[idx].highlights[:-1]
+                if trim_target is not None:
+                    section_attr, idx = trim_target
+                    section_list = getattr(trimmed_lib, section_attr)
+                    section_list[idx].highlights = section_list[idx].highlights[:-1]
+                    cut_applied = True
+            # Phase 3 — drop a publication, then a certification.
+            if not cut_applied:
+                trimmed_lib = deepcopy(trimmed_lib)
+                if trimmed_lib.publications:
+                    trimmed_lib.publications = trimmed_lib.publications[:-1]
+                    cut_applied = True
+                elif trimmed_lib.certifications:
+                    trimmed_lib.certifications = trimmed_lib.certifications[:-1]
+                    cut_applied = True
+            # Phase 4 — bullet floor goes to 1.
+            if not cut_applied and min_proj_bullets > 1:
+                min_proj_bullets = 1
+                trimmed_lib = deepcopy(trimmed_lib)
+                trim_target = _pick_trim_target(
+                    trimmed_lib, caps, min_proj_bullets, min_exp_bullets
+                )
+                if trim_target is not None:
+                    section_attr, idx = trim_target
+                    section_list = getattr(trimmed_lib, section_attr)
+                    section_list[idx].highlights = section_list[idx].highlights[:-1]
+                    cut_applied = True
+            # Phase 5 — clamp summary to the first two sentences.
+            if not cut_applied and not summary_trimmed and trimmed_lib.summary:
+                trimmed_lib = deepcopy(trimmed_lib)
+                sents = _split_sentences(trimmed_lib.summary)
+                if len(sents) > 2:
+                    trimmed_lib.summary = " ".join(sents[:2]).strip()
+                    summary_trimmed = True
+                    cut_applied = True
+            if not cut_applied:
+                break  # exhausted every cut, accept whatever we have
             result = render_cv(
                 trimmed_lib,
                 job=job,
