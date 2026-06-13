@@ -716,9 +716,12 @@ def render_tailored_cv(
             library=library_out, job=job, want=8,
         )
 
-    # Manual per-job project pick — when present, render_cv renders
-    # exactly these titles in order and skips its automatic ranker.
+    # Manual per-job project pick. When present, render_cv restricts
+    # the projects section to these titles. _pinned_rank decides whether
+    # they're LLM-ranked within the pick (True) or forced in tick order
+    # (False).
     _pinned_titles = list(payload.pinned_project_titles or [])
+    _pinned_rank = bool(getattr(payload, "pinned_rank", True))
 
     # ---- Pick section caps. Page target + (optional) LLM decide.
     plan = plan_sections(
@@ -742,6 +745,7 @@ def render_tailored_cv(
             min_competency_rating=payload.min_competency_rating,
             core_competencies_override=core_competencies_override,
             pinned_project_titles=_pinned_titles,
+            pinned_rank=_pinned_rank,
         )
         latex_low_local = r.latex.lower()
         cov_list: list[str] = []
@@ -805,6 +809,7 @@ def render_tailored_cv(
             min_competency_rating=payload.min_competency_rating,
             core_competencies_override=core_competencies_override,
             pinned_project_titles=_pinned_titles,
+            pinned_rank=_pinned_rank,
         )
     elif iterations_done == 0 and payload.compile_pdf:
         # First-pass render skipped PDF; compile now.
@@ -818,6 +823,7 @@ def render_tailored_cv(
             min_competency_rating=payload.min_competency_rating,
             core_competencies_override=core_competencies_override,
             pinned_project_titles=_pinned_titles,
+            pinned_rank=_pinned_rank,
         )
 
     # ---- Page-fit loop: enforce target_length as a hard page cap.
@@ -909,6 +915,7 @@ def render_tailored_cv(
                 min_competency_rating=payload.min_competency_rating,
                 core_competencies_override=core_competencies_override,
                 pinned_project_titles=_pinned_titles,
+                pinned_rank=_pinned_rank,
             )
             if not result.compiled:
                 break

@@ -553,11 +553,14 @@ class RenderCVRequest(BaseModel):
     # in the original library. Default OFF to preserve career-ops
     # "never invent" guarantee.
     enhance_tailor: bool = False
-    # Manual project pick. When non-empty, the renderer ignores its
-    # automatic project ranking/capping and renders exactly these
-    # project titles, in this order, as the Selected Projects section.
-    # Empty list = automatic selection (default behaviour).
+    # Manual project pick. When non-empty, restricts the projects
+    # section to these titles. Empty list = automatic selection.
     pinned_project_titles: list[str] = Field(default_factory=list)
+    # How the pinned set is used:
+    #   True  (default) = treat picks as the only candidate pool, then
+    #                     LLM-rank + cap them by JD fit.
+    #   False           = force all picks, in tick order, no ranking.
+    pinned_rank: bool = True
 
 
 class RenderCVResponse(BaseModel):

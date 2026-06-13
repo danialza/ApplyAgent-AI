@@ -584,15 +584,21 @@ def render_cv(
     core_competencies_override: list[str] | None = None,
     use_llm_polish: bool = False,
     pinned_project_titles: list[str] | None = None,
+    pinned_rank: bool = True,
 ) -> RenderResult:
     """Render a tailored CV. See module docstring for the pipeline.
 
-    ``pinned_project_titles`` — when non-empty, the projects section is
-    driven entirely by the user's manual pick: only these titles render
-    (matched case-insensitively against both selected + additional
-    pools), in the exact order given, bypassing the drop-zero filter
-    and the LLM relevance ranker. Titles not found are ignored. This
-    lets the user override automatic project selection per job.
+    ``pinned_project_titles`` — when non-empty, restricts the projects
+    section to the user's manual pick (matched case-insensitively
+    against both selected + additional pools). ``pinned_rank`` controls
+    how the pick is used:
+      * ``True`` (default) — the pinned set becomes the ONLY candidate
+        pool; the normal drop-zero + LLM relevance ranker + selected
+        cap run on it so the best JD matches surface and weak picks
+        fall off.
+      * ``False`` — render exactly the pinned titles in the given
+        order, bypassing drop-zero, the ranker, and the caps.
+    Titles not found are ignored.
     """
     # Stash the ORIGINAL (pre-polish) library — project ranker scores
     # against this so polish-rewritten bullets can't game ranking
@@ -644,10 +650,15 @@ def render_cv(
     # production systems on tag overlap alone.
     # Score against ORIGINAL library (not yet polished). Polish runs
     # later inside this function on the surviving top-N.
-    # Manual override — user pinned an explicit project set for this
-    # job. Bypass drop-zero + ranker entirely: render exactly these
-    # titles, in this order, as the "selected" section. The additional
-    # section is emptied so the pinned list is the whole story.
+    # Manual project pick. Two flavours:
+    #   pinned_rank=False (force) — render exactly these titles in the
+    #     given order, bypassing drop-zero + ranker + caps.
+    #   pinned_rank=True (rank, default) — treat the pinned set as the
+    #     ONLY candidate pool, then run the normal drop-zero + LLM
+    #     relevance ranker + section cap on it so the best matches for
+    #     this JD surface first and weak picks fall off.
+    # In both flavours the additional section is emptied — the pinned
+    # set is the whole story.
     pinned_norm = [
         t.strip().lower() for t in (pinned_project_titles or []) if t and t.strip()
     ]
@@ -658,7 +669,21 @@ def render_cv(
             + list(original_library.additional_projects)
             if (p.title or "").strip()
         }
-        sel_pool = [by_title[t] for t in pinned_norm if t in by_title]
+        restricted = [by_title[t] for t in pinned_norm if t in by_title]
+        if pinned_rank:
+            # Order by tag overlap but DON'T drop zero-overlap entries —
+            # the user deliberately chose every pick, so none is noise.
+            # The LLM ranker below refines the order; the page-fit cap
+            # trims any overflow. drop_zero stays off so all picks that
+            # fit are kept.
+            sel_pool = _rank_entries(
+                restricted,
+                jd_terms,
+                lambda p: list(p.tags or []) + list(p.highlights or []),
+                drop_zero=False,
+            )
+        else:
+            sel_pool = restricted
         add_pool = []
     else:
         sel_pool = _rank_entries(
@@ -674,7 +699,9 @@ def render_cv(
             drop_zero=True,
         )
 
-    if not pinned_norm and job and (job.raw_text or "").strip() and (sel_pool or add_pool):
+    # Run the LLM relevance re-rank when NOT pinned, OR when pinned in
+    # rank mode (so picks are prioritised by JD fit).
+    if (not pinned_norm or pinned_rank) and job and (job.raw_text or "").strip() and (sel_pool or add_pool):
         try:
             from app.services.project_relevance_ranker import rank_projects
             sel_order = rank_projects(job.raw_text, sel_pool)
@@ -701,9 +728,13 @@ def render_cv(
     def _polished_or_original(p):
         return polished_lookup.get((p.title or "").lower(), p)
 
-    # When the user pinned a manual set, honour all of it — the section
-    # caps don't apply to an explicit pick.
-    sel_cap = len(sel_pool) if pinned_norm else max_selected_projects
+    # Pinned + force → honour every pick (cap = len). Pinned + rank →
+    # apply the normal selected cap so the LLM-ranked best-N surface.
+    # Unpinned → normal cap.
+    if pinned_norm and not pinned_rank:
+        sel_cap = len(sel_pool)
+    else:
+        sel_cap = max_selected_projects
     selected = [_polished_or_original(p) for p in sel_pool[:sel_cap]] if sel_cap else []
     additional = [_polished_or_original(p) for p in add_pool[:max_additional_projects]] if (max_additional_projects and not pinned_norm) else []
 

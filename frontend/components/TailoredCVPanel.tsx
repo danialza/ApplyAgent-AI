@@ -56,6 +56,8 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
   const [enhanceTailor, setEnhanceTailor] = useState(false);
   // Manual per-job project pick. Empty set = automatic ranking.
   const [pinnedTitles, setPinnedTitles] = useState<string[]>([]);
+  // true = LLM ranks + trims within the pick; false = force all picks.
+  const [pinnedRank, setPinnedRank] = useState(true);
   // Coverage auto-boost target. Renderer loops the LLM up to 3 times
   // weaving missing JD keywords into existing bullets until coverage
   // hits this fraction (or the loop stalls).
@@ -313,6 +315,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
         target_keyword_coverage: coverageTarget,
         enhance_tailor: enhanceTailor,
         pinned_project_titles: pinnedTitles,
+        pinned_rank: pinnedRank,
       });
       setResult(data);
       if (data.compile_error && !data.compiled) {
@@ -756,8 +759,8 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
             <div className="mt-2 space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-[11px] text-slate-500">
-                  Tick the projects to force into this CV. Nothing ticked =
-                  automatic JD-ranked selection. Order = tick order.
+                  Tick the projects to consider for this CV. Nothing ticked =
+                  every project is in play (automatic JD ranking).
                 </p>
                 {pinnedTitles.length > 0 && (
                   <button
@@ -769,6 +772,25 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
                   </button>
                 )}
               </div>
+              {pinnedTitles.length > 0 && (
+                <label className="flex items-start gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={pinnedRank}
+                    onChange={(e) => setPinnedRank(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                  />
+                  <span>
+                    <span className="font-semibold text-slate-700">
+                      Let the LLM rank & trim within my picks
+                    </span>
+                    <br />
+                    {pinnedRank
+                      ? "On — only these projects are considered, then the JD ranker orders them and the page-fit cap keeps the best. Recommended."
+                      : "Off — force ALL ticked projects, in tick order, no ranking or trimming."}
+                  </span>
+                </label>
+              )}
               {[
                 ...library.selected_projects.map((p) => ({
                   title: p.title,
@@ -800,7 +822,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
                         }}
                         className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                       />
-                      {checked && (
+                      {checked && !pinnedRank && (
                         <span className="w-4 shrink-0 text-center text-[10px] font-bold text-brand-700">
                           {idx + 1}
                         </span>

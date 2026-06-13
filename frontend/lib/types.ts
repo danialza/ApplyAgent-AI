@@ -411,9 +411,12 @@ export interface RenderCVRequest {
   /** Enhance mode — allow LLM to add JD-relevant skills, expand
    *  project bullets, and rewrite experience bullets more freely. */
   enhance_tailor?: boolean;
-  /** Manual project pick. When non-empty, the renderer renders exactly
-   *  these project titles (in order) and skips its automatic ranker. */
+  /** Manual project pick. When non-empty, restricts the projects
+   *  section to these titles. */
   pinned_project_titles?: string[];
+  /** How the pick is used. true (default) = LLM-rank + cap within the
+   *  pick; false = force all picks in tick order. */
+  pinned_rank?: boolean;
 }
 
 export interface SectionPlanOut {
