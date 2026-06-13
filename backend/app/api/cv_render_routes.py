@@ -836,7 +836,12 @@ def render_tailored_cv(
     #   4. Trim bullets down to floor=1.
     #   5. Truncate summary to the first two sentences.
     # Hard ceiling: 20 iterations.
-    if payload.compile_pdf and result.compiled and result.pdf_b64:
+    if (
+        payload.compile_pdf
+        and result.compiled
+        and result.pdf_b64
+        and getattr(payload, "enforce_page_cap", True)
+    ):
         target_pages = _target_pages_for(payload.target_length)
         caps = [
             plan.max_selected_projects,

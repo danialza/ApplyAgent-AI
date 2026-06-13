@@ -9,6 +9,7 @@ import {
   ignoreIssue,
   putCVLibrary,
   rebuildLibraryForce,
+  renderCV,
   unignoreAllIssues,
   unlockLibrary,
   type LibraryIssue,
@@ -42,6 +43,55 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorJson, setEditorJson] = useState("");
   const [editorSaving, setEditorSaving] = useState(false);
+  // Master-CV PDF export — renders the full library (no JD) through the
+  // same LaTeX renderer the tailor uses, with the page-cap disabled so
+  // every project / experience lands.
+  const [pdfBusy, setPdfBusy] = useState(false);
+
+  async function downloadMasterPdf() {
+    setPdfBusy(true);
+    try {
+      const data = await renderCV({
+        job_text: "", // no JD → unfiltered master CV
+        compile_pdf: true,
+        use_llm: false, // no JD to tailor against; keep it rule-based + free
+        // Show everything — max caps (schema ceiling is 20) + no
+        // 2-page shrink.
+        max_selected_projects: 20,
+        max_additional_projects: 20,
+        max_experience: 20,
+        enforce_page_cap: false,
+      });
+      if (!data.pdf_b64) {
+        alert(
+          data.compile_error
+            ? `PDF compile failed: ${data.compile_error}`
+            : "No PDF returned."
+        );
+        return;
+      }
+      const bytes = Uint8Array.from(atob(data.pdf_b64), (c) =>
+        c.charCodeAt(0)
+      );
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const who = (lib?.header.name || "master")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+      a.href = url;
+      a.download = `cv-${who || "master"}-master.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Master PDF export failed.");
+    } finally {
+      setPdfBusy(false);
+    }
+  }
 
   function openEditor() {
     if (!lib) return;
@@ -312,8 +362,17 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
           {lib.header.website && <a href={lib.header.website} target="_blank" rel="noreferrer" className="underline">Site</a>}
           <button
             type="button"
+            onClick={downloadMasterPdf}
+            disabled={pdfBusy}
+            className="ml-1 rounded bg-slate-900 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+            title="Render the full master CV (every project + experience) as a PDF, in the same style as the tailored CV. No 2-page limit."
+          >
+            {pdfBusy ? "Rendering…" : "Download master PDF"}
+          </button>
+          <button
+            type="button"
             onClick={openEditor}
-            className="ml-1 rounded border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+            className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
             title="Edit master library JSON. Saves with a lock so source uploads won't overwrite."
           >
             Edit library

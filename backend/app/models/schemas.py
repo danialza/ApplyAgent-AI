@@ -561,6 +561,11 @@ class RenderCVRequest(BaseModel):
     #                     LLM-rank + cap them by JD fit.
     #   False           = force all picks, in tick order, no ranking.
     pinned_rank: bool = True
+    # When False, the post-compile page-fit shrink loop is skipped so
+    # the PDF can run past the target_length page cap. Used by the
+    # master-CV PDF export, which wants the full record on as many
+    # pages as it takes. Default True keeps tailored renders bounded.
+    enforce_page_cap: bool = True
 
 
 class RenderCVResponse(BaseModel):

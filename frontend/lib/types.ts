@@ -417,6 +417,9 @@ export interface RenderCVRequest {
   /** How the pick is used. true (default) = LLM-rank + cap within the
    *  pick; false = force all picks in tick order. */
   pinned_rank?: boolean;
+  /** When false, skips the 2-page shrink loop so the PDF can run long.
+   *  Used by the master-CV export. Default true. */
+  enforce_page_cap?: boolean;
 }
 
 export interface SectionPlanOut {
