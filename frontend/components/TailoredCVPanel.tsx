@@ -54,6 +54,8 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
   // and llm_skip_reason explains the gap in the error banner.
   const [useLlm, setUseLlm] = useState(true);
   const [enhanceTailor, setEnhanceTailor] = useState(false);
+  // Manual per-job project pick. Empty set = automatic ranking.
+  const [pinnedTitles, setPinnedTitles] = useState<string[]>([]);
   // Coverage auto-boost target. Renderer loops the LLM up to 3 times
   // weaving missing JD keywords into existing bullets until coverage
   // hits this fraction (or the loop stalls).
@@ -310,6 +312,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
         target_length: targetLength,
         target_keyword_coverage: coverageTarget,
         enhance_tailor: enhanceTailor,
+        pinned_project_titles: pinnedTitles,
       });
       setResult(data);
       if (data.compile_error && !data.compiled) {
@@ -735,6 +738,83 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
           />
         </div>
       </details>
+
+      {/* Manual project pick — override the automatic ranker per job.
+          Empty selection = automatic. Order follows click order. */}
+      {library &&
+        (library.selected_projects.length > 0 ||
+          library.additional_projects.length > 0) && (
+          <details className="rounded-lg border border-slate-200 bg-white p-2 text-xs">
+            <summary className="cursor-pointer select-none font-medium text-slate-600">
+              Projects · pick manually{" "}
+              {pinnedTitles.length > 0 && (
+                <span className="ml-1 rounded-full bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold text-brand-800">
+                  {pinnedTitles.length} pinned
+                </span>
+              )}
+            </summary>
+            <div className="mt-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] text-slate-500">
+                  Tick the projects to force into this CV. Nothing ticked =
+                  automatic JD-ranked selection. Order = tick order.
+                </p>
+                {pinnedTitles.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setPinnedTitles([])}
+                    className="shrink-0 rounded border border-slate-300 bg-white px-2 py-0.5 font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    Clear (auto)
+                  </button>
+                )}
+              </div>
+              {[
+                ...library.selected_projects.map((p) => ({
+                  title: p.title,
+                  group: "Selected",
+                })),
+                ...library.additional_projects.map((p) => ({
+                  title: p.title,
+                  group: "Additional",
+                })),
+              ]
+                .filter((x) => (x.title || "").trim())
+                .map((x) => {
+                  const idx = pinnedTitles.indexOf(x.title);
+                  const checked = idx >= 0;
+                  return (
+                    <label
+                      key={x.title}
+                      className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-slate-50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          setPinnedTitles((prev) =>
+                            e.target.checked
+                              ? [...prev, x.title]
+                              : prev.filter((t) => t !== x.title)
+                          );
+                        }}
+                        className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                      />
+                      {checked && (
+                        <span className="w-4 shrink-0 text-center text-[10px] font-bold text-brand-700">
+                          {idx + 1}
+                        </span>
+                      )}
+                      <span className="text-slate-700">{x.title}</span>
+                      <span className="ml-auto rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+                        {x.group}
+                      </span>
+                    </label>
+                  );
+                })}
+            </div>
+          </details>
+        )}
 
       {!library && !loadingLibrary && (
         <p className="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-500">

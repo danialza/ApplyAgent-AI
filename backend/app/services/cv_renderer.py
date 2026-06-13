@@ -583,8 +583,17 @@ def render_cv(
     min_competency_rating: int = 3,
     core_competencies_override: list[str] | None = None,
     use_llm_polish: bool = False,
+    pinned_project_titles: list[str] | None = None,
 ) -> RenderResult:
-    """Render a tailored CV. See module docstring for the pipeline."""
+    """Render a tailored CV. See module docstring for the pipeline.
+
+    ``pinned_project_titles`` — when non-empty, the projects section is
+    driven entirely by the user's manual pick: only these titles render
+    (matched case-insensitively against both selected + additional
+    pools), in the exact order given, bypassing the drop-zero filter
+    and the LLM relevance ranker. Titles not found are ignored. This
+    lets the user override automatic project selection per job.
+    """
     # Stash the ORIGINAL (pre-polish) library — project ranker scores
     # against this so polish-rewritten bullets can't game ranking
     # (used to surface robotics projects on data JDs by sprinkling
@@ -635,20 +644,37 @@ def render_cv(
     # production systems on tag overlap alone.
     # Score against ORIGINAL library (not yet polished). Polish runs
     # later inside this function on the surviving top-N.
-    sel_pool = _rank_entries(
-        list(original_library.selected_projects),
-        jd_terms,
-        lambda p: list(p.tags or []) + list(p.highlights or []),
-        drop_zero=True,
-    )
-    add_pool = _rank_entries(
-        list(original_library.additional_projects),
-        jd_terms,
-        lambda p: list(p.tags or []) + list(p.highlights or []),
-        drop_zero=True,
-    )
+    # Manual override — user pinned an explicit project set for this
+    # job. Bypass drop-zero + ranker entirely: render exactly these
+    # titles, in this order, as the "selected" section. The additional
+    # section is emptied so the pinned list is the whole story.
+    pinned_norm = [
+        t.strip().lower() for t in (pinned_project_titles or []) if t and t.strip()
+    ]
+    if pinned_norm:
+        by_title = {
+            (p.title or "").strip().lower(): p
+            for p in list(original_library.selected_projects)
+            + list(original_library.additional_projects)
+            if (p.title or "").strip()
+        }
+        sel_pool = [by_title[t] for t in pinned_norm if t in by_title]
+        add_pool = []
+    else:
+        sel_pool = _rank_entries(
+            list(original_library.selected_projects),
+            jd_terms,
+            lambda p: list(p.tags or []) + list(p.highlights or []),
+            drop_zero=True,
+        )
+        add_pool = _rank_entries(
+            list(original_library.additional_projects),
+            jd_terms,
+            lambda p: list(p.tags or []) + list(p.highlights or []),
+            drop_zero=True,
+        )
 
-    if job and (job.raw_text or "").strip() and (sel_pool or add_pool):
+    if not pinned_norm and job and (job.raw_text or "").strip() and (sel_pool or add_pool):
         try:
             from app.services.project_relevance_ranker import rank_projects
             sel_order = rank_projects(job.raw_text, sel_pool)
@@ -675,8 +701,11 @@ def render_cv(
     def _polished_or_original(p):
         return polished_lookup.get((p.title or "").lower(), p)
 
-    selected = [_polished_or_original(p) for p in sel_pool[:max_selected_projects]] if max_selected_projects else []
-    additional = [_polished_or_original(p) for p in add_pool[:max_additional_projects]] if max_additional_projects else []
+    # When the user pinned a manual set, honour all of it — the section
+    # caps don't apply to an explicit pick.
+    sel_cap = len(sel_pool) if pinned_norm else max_selected_projects
+    selected = [_polished_or_original(p) for p in sel_pool[:sel_cap]] if sel_cap else []
+    additional = [_polished_or_original(p) for p in add_pool[:max_additional_projects]] if (max_additional_projects and not pinned_norm) else []
 
     # Experience / certs / pubs: rank on ORIGINAL, render POLISHED.
     exp_lookup = {(x.title or "").lower() + "|" + (x.company or "").lower(): x

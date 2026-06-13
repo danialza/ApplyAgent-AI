@@ -716,6 +716,10 @@ def render_tailored_cv(
             library=library_out, job=job, want=8,
         )
 
+    # Manual per-job project pick — when present, render_cv renders
+    # exactly these titles in order and skips its automatic ranker.
+    _pinned_titles = list(payload.pinned_project_titles or [])
+
     # ---- Pick section caps. Page target + (optional) LLM decide.
     plan = plan_sections(
         target_length=payload.target_length,
@@ -737,6 +741,7 @@ def render_tailored_cv(
             compile_pdf=False,  # only the final pass compiles PDF
             min_competency_rating=payload.min_competency_rating,
             core_competencies_override=core_competencies_override,
+            pinned_project_titles=_pinned_titles,
         )
         latex_low_local = r.latex.lower()
         cov_list: list[str] = []
@@ -799,6 +804,7 @@ def render_tailored_cv(
             compile_pdf=True,
             min_competency_rating=payload.min_competency_rating,
             core_competencies_override=core_competencies_override,
+            pinned_project_titles=_pinned_titles,
         )
     elif iterations_done == 0 and payload.compile_pdf:
         # First-pass render skipped PDF; compile now.
@@ -811,6 +817,7 @@ def render_tailored_cv(
             compile_pdf=True,
             min_competency_rating=payload.min_competency_rating,
             core_competencies_override=core_competencies_override,
+            pinned_project_titles=_pinned_titles,
         )
 
     # ---- Page-fit loop: enforce target_length as a hard page cap.
@@ -901,6 +908,7 @@ def render_tailored_cv(
                 compile_pdf=True,
                 min_competency_rating=payload.min_competency_rating,
                 core_competencies_override=core_competencies_override,
+                pinned_project_titles=_pinned_titles,
             )
             if not result.compiled:
                 break
