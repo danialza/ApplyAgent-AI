@@ -96,6 +96,41 @@ docker-clean: ## Stop services AND remove volumes (deletes DB, uploads, index).
 docker-rebuild: ## Force rebuild without cache.
 	$(COMPOSE_UNSET) docker compose $(COMPOSE_ENV_FILES) build --no-cache
 
+# ---- Claude-subscription stack (parallel, ports 3100 / 8100) ----
+# Drives the LLM through your Claude Pro/Max subscription (no API
+# credits) via headless `claude --print`. Isolated containers/volumes,
+# so the API-key stack (3000/8000) is untouched.
+
+CLAUDE_COMPOSE := docker compose -f docker-compose.claude.yml --env-file .env.claude
+
+.PHONY: claude-token
+claude-token: ## Snapshot the Pro OAuth token from the Keychain → .env.claude.
+	@bash scripts/claude-token.sh
+
+.PHONY: claude-up
+claude-up: ## Build + start the claude-subscription stack (3100 / 8100).
+	@test -f .env.claude || { echo "Run 'make claude-token' first."; exit 1; }
+	$(COMPOSE_UNSET) $(CLAUDE_COMPOSE) up --build -d
+	@echo ""
+	@echo "Claude-sub Backend  → http://localhost:8100  (docs at /docs)"
+	@echo "Claude-sub Frontend → http://localhost:3100"
+
+.PHONY: claude-down
+claude-down: ## Stop the claude-subscription stack (volumes preserved).
+	$(COMPOSE_UNSET) $(CLAUDE_COMPOSE) down
+
+.PHONY: claude-logs
+claude-logs: ## Tail the claude-subscription stack logs.
+	$(COMPOSE_UNSET) $(CLAUDE_COMPOSE) logs -f --tail=100
+
+.PHONY: claude-clean
+claude-clean: ## Stop the claude stack AND remove its volumes (deletes its DB).
+	$(COMPOSE_UNSET) $(CLAUDE_COMPOSE) down -v
+
+.PHONY: claude-seed-from-main
+claude-seed-from-main: ## Copy the API-key stack's DB into the claude stack (one-time).
+	@bash scripts/claude-seed-from-main.sh
+
 # ---- Help ----
 
 .PHONY: help

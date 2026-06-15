@@ -1,0 +1,90 @@
+# AI Job-CV Matching Agent — CLAUDE-SUBSCRIPTION variant.
+#
+# A fully isolated second deployment that drives the LLM through your
+# Claude Code Pro/Max *subscription* (no API-credit billing) instead of
+# an ANTHROPIC_API_KEY. It runs side-by-side with the API-key stack
+# (docker-compose.yml) on different ports / containers / volumes, so
+# the version you use day-to-day is never touched.
+#
+# Bring it up:
+#     make claude-token     # snapshot the Pro OAuth token → .env.claude
+#     make claude-up        # build + start on 3100 / 8100
+#
+# Frontend → http://localhost:3100
+# Backend  → http://localhost:8100   (Swagger at /docs)
+#
+# Auth: the backend shells out to `claude --print` which authenticates
+# with CLAUDE_CODE_OAUTH_TOKEN (extracted from the host Keychain by
+# `make claude-token`). The token is short-lived (~hours); if LLM calls
+# start failing with an auth error, re-run `make claude-token` and
+# `make claude-up`.
+
+name: applyagent-claude
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: ai-job-cv-matcher-backend-claude
+    container_name: ai-job-cv-backend-claude
+    restart: unless-stopped
+    ports:
+      - "${CLAUDE_BACKEND_PORT:-8100}:8000"
+    environment:
+      APP_DB_URL: sqlite:////data/app.db
+      APP_INDEX_DIR: /data/index
+      APP_CORS_ORIGINS: ${CLAUDE_CORS_ORIGINS:-http://localhost:3100}
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
+
+      # --- LLM via the Pro/Max subscription (no API credits) ---
+      USE_LLM_EXTRACTION: "true"
+      LLM_PROVIDER: claude_code
+      # Family alias — the subscription CLI accepts sonnet/opus/haiku
+      # reliably. The backend also maps any full id to its alias.
+      ANTHROPIC_MODEL: ${CLAUDE_STACK_MODEL:-sonnet}
+      # Pro OAuth token, snapshotted from the host Keychain by
+      # `make claude-token`. NOT an API key — no per-call billing.
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Headless claude can take a while on a cold call; give it room.
+      LLM_TIMEOUT_SECONDS: ${CLAUDE_LLM_TIMEOUT_SECONDS:-180}
+      LATEX_COMPILE_TIMEOUT_SECONDS: ${LATEX_COMPILE_TIMEOUT_SECONDS:-180}
+      XDG_CACHE_HOME: /data/tectonic_cache
+      APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+    volumes:
+      - backend_data_claude:/data
+      - hf_cache_claude:/data/hf_cache
+      - ./docs:/app/docs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Baked into the client bundle — must point at THIS stack's
+        # backend port.
+        NEXT_PUBLIC_API_URL: ${CLAUDE_NEXT_PUBLIC_API_URL:-http://localhost:8100}
+    image: ai-job-cv-matcher-frontend-claude
+    container_name: ai-job-cv-frontend-claude
+    restart: unless-stopped
+    ports:
+      - "${CLAUDE_FRONTEND_PORT:-3100}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  backend_data_claude:   # SQLite + uploads + FAISS index (isolated)
+  hf_cache_claude:       # sentence-transformers model cache (isolated)

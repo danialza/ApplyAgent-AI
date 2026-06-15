@@ -309,6 +309,29 @@ def _chat_completion_openai(
     return data["choices"][0]["message"]["content"]
 
 
+def _to_cli_model_alias(model_raw: str) -> str:
+    """Map a model id to a subscription-CLI-friendly alias.
+
+    The `claude` CLI under a Pro/Max plan accepts the family aliases
+    (`sonnet`, `opus`, `haiku`) reliably but rejects most full API ids
+    ("you may not have access to it"). Returns "" when no --model flag
+    should be passed (account default).
+    """
+    m = (model_raw or "").strip().lower()
+    if not m or m in {"default", "auto"}:
+        return ""
+    if m in {"sonnet", "opus", "haiku"}:
+        return m
+    if "opus" in m:
+        return "opus"
+    if "haiku" in m:
+        return "haiku"
+    if "sonnet" in m:
+        return "sonnet"
+    # Unknown vendor id — let the CLI try it verbatim.
+    return model_raw.strip()
+
+
 def _chat_completion_claude_code(
     messages: list[dict[str, str]],
     cfg: dict[str, Any],
@@ -350,17 +373,21 @@ def _chat_completion_claude_code(
     full_prompt = "\n\n".join(prompt_blocks)
 
     # CLI model handling:
-    #   * Full API IDs (claude-sonnet-4-5) work IF the user's Pro
-    #     plan has access to that specific version.
-    #   * Short aliases (sonnet/opus/haiku) resolve to whatever the
-    #     CLI default is for the current release — may differ from
-    #     what the Pro plan grants.
-    #   * Safest: pass the configured ID verbatim, fall back to no
-    #     --model so CLI uses the user's account default.
+    #   * Short aliases (sonnet/opus/haiku) are what the Pro/Max CLI
+    #     reliably accepts — they resolve to the version the account
+    #     is entitled to for the current release.
+    #   * Full API IDs (claude-sonnet-4-6) are frequently REJECTED by
+    #     the subscription CLI with "you may not have access to it",
+    #     even when the alias works. So we collapse any full Claude ID
+    #     to its family alias before invoking the CLI. The UI model
+    #     picker can still set a full ID (it drives the API-key stack);
+    #     here we map it to a CLI-friendly alias.
+    #   * "default"/"auto"/empty → no --model (account default).
     cmd = ["claude", "--print"]
     model_raw = (cfg.get("model") or "").strip()
-    if model_raw and model_raw.lower() not in {"default", "auto"}:
-        cmd += ["--model", model_raw]
+    model_cli = _to_cli_model_alias(model_raw)
+    if model_cli:
+        cmd += ["--model", model_cli]
 
     try:
         proc = subprocess.run(
