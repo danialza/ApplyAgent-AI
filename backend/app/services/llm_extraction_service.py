@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
@@ -389,6 +390,21 @@ def _chat_completion_claude_code(
     if model_cli:
         cmd += ["--model", model_cli]
 
+    # Token sourcing — the Pro OAuth token is short-lived (~hours). To
+    # refresh WITHOUT recreating the container, read it from a file
+    # (CLAUDE_OAUTH_TOKEN_FILE) on every call when that env var is set;
+    # a host-side timer rewrites the file. Falls back to the static
+    # CLAUDE_CODE_OAUTH_TOKEN env (start-time snapshot) otherwise.
+    sub_env = dict(os.environ)
+    token_file = os.getenv("CLAUDE_OAUTH_TOKEN_FILE", "").strip()
+    if token_file:
+        try:
+            tok = Path(token_file).read_text(encoding="utf-8").strip()
+            if tok:
+                sub_env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
+        except OSError:
+            pass  # fall back to whatever's already in the env
+
     try:
         proc = subprocess.run(
             cmd,
@@ -396,6 +412,7 @@ def _chat_completion_claude_code(
             capture_output=True,
             text=True,
             timeout=cfg["timeout"],
+            env=sub_env,
         )
     except FileNotFoundError as exc:
         raise RuntimeError(

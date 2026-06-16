@@ -59,12 +59,23 @@ CLAUDE_FRONTEND_PORT=3100
 CLAUDE_BACKEND_PORT=8100
 CLAUDE_NEXT_PUBLIC_API_URL=http://localhost:8100
 CLAUDE_CORS_ORIGINS=http://localhost:3100
-CLAUDE_STACK_MODEL=sonnet
+CLAUDE_STACK_MODEL=opus
 CLAUDE_LLM_TIMEOUT_SECONDS=600
 EOF
 chmod 600 "$ENV_FILE"
 
-echo "✓ Wrote ${ENV_FILE}"
+# Also write the LIVE token file the running container reads on every
+# call (CLAUDE_OAUTH_TOKEN_FILE → ~/.applyagent/claude_token, mounted
+# read-only into the backend). Writing this lets the hourly watcher
+# refresh the token with NO container restart. Atomic write (temp +
+# mv) so a call never reads a half-written file.
+LIVE_DIR="${HOME}/.applyagent"
+mkdir -p "$LIVE_DIR"
+printf '%s' "$TOKEN" > "${LIVE_DIR}/claude_token.tmp"
+chmod 600 "${LIVE_DIR}/claude_token.tmp"
+mv -f "${LIVE_DIR}/claude_token.tmp" "${LIVE_DIR}/claude_token"
+
+echo "✓ Wrote ${ENV_FILE} + ${LIVE_DIR}/claude_token"
 echo "  token: ${TOKEN:0:14}… (len ${#TOKEN})"
 echo "  expires: ${EXPIRES}"
 echo "  next: make claude-up"

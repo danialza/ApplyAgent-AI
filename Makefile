@@ -108,12 +108,24 @@ claude-token: ## Snapshot the Pro OAuth token from the Keychain → .env.claude.
 	@bash scripts/claude-token.sh
 
 .PHONY: claude-up
-claude-up: ## Build + start the claude-subscription stack (3100 / 8100).
-	@test -f .env.claude || { echo "Run 'make claude-token' first."; exit 1; }
+claude-up: ## Refresh token, build + start the claude-subscription stack (3100 / 8100).
+	@bash scripts/claude-token.sh
 	$(COMPOSE_UNSET) $(CLAUDE_COMPOSE) up --build -d
 	@echo ""
 	@echo "Claude-sub Backend  → http://localhost:8100  (docs at /docs)"
 	@echo "Claude-sub Frontend → http://localhost:3100"
+
+.PHONY: claude-watch-install
+claude-watch-install: ## Install hourly launchd token-refresher (no more 401s).
+	@bash scripts/claude-watch.sh install
+
+.PHONY: claude-watch-uninstall
+claude-watch-uninstall: ## Remove the hourly token-refresher.
+	@bash scripts/claude-watch.sh uninstall
+
+.PHONY: claude-watch-status
+claude-watch-status: ## Show the token-refresher state + recent log.
+	@bash scripts/claude-watch.sh status
 
 .PHONY: claude-down
 claude-down: ## Stop the claude-subscription stack (volumes preserved).
@@ -128,8 +140,9 @@ claude-clean: ## Stop the claude stack AND remove its volumes (deletes its DB).
 	$(COMPOSE_UNSET) $(CLAUDE_COMPOSE) down -v
 
 .PHONY: claude-seed-from-main
-claude-seed-from-main: ## Copy the API-key stack's DB into the claude stack (one-time).
-	@bash scripts/claude-seed-from-main.sh
+claude-seed-from-main: ## (obsolete) The stacks now SHARE one DB volume — nothing to copy.
+	@echo "Both stacks share the applyagentai_backend_data volume now."
+	@echo "Data is always in sync; no seeding needed."
 
 # ---- Help ----
 

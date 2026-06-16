@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 # Resolve a project-relative default DB path (no hardcoded absolute paths).
@@ -27,6 +27,22 @@ engine = create_engine(
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+if DB_URL.startswith("sqlite"):
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001
+        """WAL + a busy timeout so TWO backend containers can share one
+        SQLite file (the API-key stack on 3000/8000 and the
+        subscription stack on 3100/8100 mount the same volume). WAL lets
+        concurrent readers run alongside a writer; busy_timeout makes a
+        writer wait for a lock instead of erroring 'database is locked'.
+        Harmless for the single-stack case."""
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=8000")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.close()
 
 
 class Base(DeclarativeBase):

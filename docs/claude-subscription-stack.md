@@ -14,8 +14,15 @@ day-to-day stack (ports `3000` / `8000`) changes.
 | Frontend | http://localhost:3000 | http://localhost:3100 |
 | Backend | http://localhost:8000 | http://localhost:8100 |
 | Containers | `ai-job-cv-*` | `ai-job-cv-*-claude` |
-| Volumes | `applyagentai_*` | `applyagent-claude_*` |
+| Database | `applyagentai_backend_data` | **same volume — shared** |
 | LLM | `ANTHROPIC_API_KEY` (billed) | Pro/Max subscription (no credits) |
+| Model | `claude-sonnet-4-6` | `opus` (subscription alias) |
+
+Both stacks share **one** SQLite database, so your master CV, sources,
+and applications are always in sync — edit on either port, see it on
+both. WAL mode + a busy timeout (set in `app/db/database.py`) make
+concurrent access safe for single-user use. The shared volume is
+declared `external`, so `make claude-clean` can never delete your data.
 
 ## How auth works
 
@@ -32,13 +39,12 @@ automatically; we just re-copy the current value when needed.
 ## First run
 
 ```bash
-make claude-token            # snapshot the Pro token → .env.claude
-make claude-up               # build + start on 3100 / 8100
-make claude-seed-from-main   # (optional) copy your live master CV in
-make claude-up               # restart so the seeded DB is picked up
+make claude-up               # refreshes the token, builds + starts 3100/8100
+make claude-watch-install    # hourly token auto-refresh (no more 401s)
 ```
 
-Open http://localhost:3100.
+Open http://localhost:3100. The master CV is already there — the DB is
+shared with the API-key stack.
 
 ## Day-to-day
 
@@ -49,13 +55,30 @@ make claude-logs      # tail logs
 make claude-clean     # stop + delete this stack's volumes only
 ```
 
-## When LLM calls start failing with an auth error
+## Token auto-refresh (no more 401s)
 
-The token expired. Refresh and restart:
+The Pro OAuth token is short-lived (~hours). Two things keep it fresh
+automatically:
+
+1. The backend reads the token from a live file
+   (`~/.applyagent/claude_token`, mounted read-only) on **every** LLM
+   call — so refreshing the file takes effect with **no container
+   restart**.
+2. `make claude-watch-install` installs a launchd agent that rewrites
+   that file every hour (it pings the host CLI to force a Keychain
+   refresh first).
+
+```bash
+make claude-watch-install     # turn on hourly refresh
+make claude-watch-status      # check it
+make claude-watch-uninstall   # turn it off
+```
+
+If you ever see a 401 before the watcher kicks in, refresh by hand —
+no restart needed:
 
 ```bash
 make claude-token
-make claude-up
 ```
 
 ## Notes
@@ -67,8 +90,13 @@ make claude-up
   `claude-sonnet-4-6`) to its alias automatically, so the UI model
   picker won't break this stack.
 - Subscription calls run through the local `claude` CLI and are a bit
-  slower than the raw API; `LLM_TIMEOUT_SECONDS` is bumped to 180s for
+  slower than the raw API — `opus` headless polish of the full library
+  runs a few minutes, so `LLM_TIMEOUT_SECONDS` is bumped to 600s for
   this stack.
-- The two stacks have separate databases. `make claude-seed-from-main`
-  copies the API-key stack's DB into the claude stack once; after that
-  they diverge.
+- The two stacks **share one database** (the `applyagentai_backend_data`
+  volume), so data is always in sync. It's declared `external` in the
+  claude compose file, so `make claude-clean` removes only this stack's
+  own caches — never your DB.
+- Avoid running a tailored render on **both** ports at the exact same
+  moment; WAL + an 8s busy timeout handle normal single-user switching,
+  but two simultaneous heavy writes can still contend.

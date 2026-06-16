@@ -45,16 +45,30 @@ services:
       ANTHROPIC_MODEL: ${CLAUDE_STACK_MODEL:-sonnet}
       # Pro OAuth token, snapshotted from the host Keychain by
       # `make claude-token`. NOT an API key — no per-call billing.
+      # Start-time fallback value:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Live token file — read on every LLM call so a host-side timer
+      # (make claude-watch-install) can refresh the short-lived token
+      # WITHOUT recreating this container. Mounted below.
+      CLAUDE_OAUTH_TOKEN_FILE: /run/applyagent/claude_token
       # Headless claude can take a while on a cold call; give it room.
       LLM_TIMEOUT_SECONDS: ${CLAUDE_LLM_TIMEOUT_SECONDS:-180}
       LATEX_COMPILE_TIMEOUT_SECONDS: ${LATEX_COMPILE_TIMEOUT_SECONDS:-180}
       XDG_CACHE_HOME: /data/tectonic_cache
       APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
     volumes:
-      - backend_data_claude:/data
+      # SHARED database — mounts the API-key stack's volume so both
+      # deployments read/write ONE SQLite (master CV, sources,
+      # applications stay in sync). WAL + busy_timeout (set in
+      # app/db/database.py) make concurrent access safe for single-user
+      # use. Declared `external` below so `claude-clean` (down -v) can
+      # never delete your live data.
+      - applyagentai_backend_data:/data
       - hf_cache_claude:/data/hf_cache
       - ./docs:/app/docs:ro
+      # Live OAuth-token directory (host). Mounted read-only; the
+      # backend reads /run/applyagent/claude_token on each LLM call.
+      - ${HOME}/.applyagent:/run/applyagent:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
       interval: 30s
@@ -86,5 +100,9 @@ services:
       start_period: 20s
 
 volumes:
-  backend_data_claude:   # SQLite + uploads + FAISS index (isolated)
+  # The live DB volume from the API-key stack. external:true means
+  # compose attaches to it but never creates or (with down -v) deletes
+  # it — your master CV is safe from `make claude-clean`.
+  applyagentai_backend_data:
+    external: true
   hf_cache_claude:       # sentence-transformers model cache (isolated)
