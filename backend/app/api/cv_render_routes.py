@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -386,6 +387,15 @@ _KNOWN_MODELS = {
         "claude-opus-4-6",
         "claude-opus-4-1",        # legacy opus
     ],
+    # Subscription stack — the CLI only takes family aliases. sonnet is
+    # the default: fast and easy on the Pro session limit. opus is
+    # higher quality but slow and burns the session quota much faster
+    # (a full render makes ~7-10 calls, which can trip "session limit").
+    "claude_code": [
+        "sonnet",
+        "opus",
+        "haiku",
+    ],
     "openai": [
         "gpt-5",
         "gpt-5-mini",
@@ -671,12 +681,62 @@ def upsert_library(
     return _to_out(row)
 
 
+@router.get("/render/progress/{progress_id}")
+def render_progress(progress_id: str) -> StreamingResponse:
+    """Server-Sent Events stream of render stages for `progress_id`.
+
+    The browser opens this BEFORE (or right as) it POSTs /render with the
+    same id, then updates a progress bar from each `data:` event. The
+    stream closes on the terminal `done` event. Heartbeat comments keep
+    proxies from buffering/closing the idle connection.
+    """
+    import json as _json
+    import time as _time
+    from app.services import progress_bus
+
+    q = progress_bus.get_queue(progress_id)
+
+    def _gen():
+        start = _time.time()
+        yield ": connected\n\n"
+        while True:
+            try:
+                ev = q.get(timeout=1.0) if q else None
+            except Exception:  # noqa: BLE001 — Empty
+                ev = None
+            if ev is None:
+                if _time.time() - start > 1200:
+                    yield "event: timeout\ndata: {}\n\n"
+                    break
+                yield ": ping\n\n"   # heartbeat
+                continue
+            yield f"data: {_json.dumps(ev)}\n\n"
+            if ev.get("stage") == "done":
+                break
+        progress_bus.drop(progress_id)
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.post("/render", response_model=RenderCVResponse)
 def render_tailored_cv(
     payload: RenderCVRequest,
     db: Session = Depends(get_db),
 ) -> RenderCVResponse:
     """Render a tailored CV. Empty `job_text` produces an unfiltered master CV."""
+    from app.services import progress_bus
+
+    _pid = (getattr(payload, "progress_id", "") or "").strip()
+
+    def _emit(stage: str, label: str, **extra) -> None:
+        """Push a live stage event when the client supplied a progress_id."""
+        if _pid:
+            progress_bus.emit(_pid, {"stage": stage, "label": label, **extra})
+
     row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
     if row is None:
         raise HTTPException(
@@ -686,6 +746,7 @@ def render_tailored_cv(
 
     job: JobParsed | None = None
     if payload.job_text.strip():
+        _emit("parse_jd", "Reading the job description")
         parsed = extract_job(payload.job_text)
         job = JobParsed(**parsed.to_dict())
 
@@ -697,6 +758,7 @@ def render_tailored_cv(
     # LLM layer is configured. Failure here is non-fatal; we fall back to
     # the rule-based renderer with the original library.
     if payload.use_llm:
+        _emit("polish", "Tailoring bullets to the role")
         polished, _bold_keywords, skip = polish_library_with_llm(
             library_out, job, enhance=bool(getattr(payload, "enhance_tailor", False))
         )
@@ -712,6 +774,7 @@ def render_tailored_cv(
     # (JD ∩ skills_groups single-token match) when LLM is off or fails.
     core_competencies_override: list[str] | None = None
     if payload.use_llm and job is not None:
+        _emit("competencies", "Picking core competencies")
         core_competencies_override = generate_competencies(
             library=library_out, job=job, want=8,
         )
@@ -724,6 +787,7 @@ def render_tailored_cv(
     _pinned_rank = bool(getattr(payload, "pinned_rank", True))
 
     # ---- Pick section caps. Page target + (optional) LLM decide.
+    _emit("plan", "Choosing which projects to feature")
     plan = plan_sections(
         target_length=payload.target_length,
         library=library_out,
@@ -758,6 +822,7 @@ def render_tailored_cv(
         cov_ratio = (len(cov_list) / len(r.matched_skills)) if r.matched_skills else 0.0
         return r, cov_list, miss_list, cov_ratio
 
+    _emit("layout", "Laying out the CV")
     result, covered, missing, coverage = _render_and_score(library_out)
     coverage_history: list[float] = [round(coverage, 3)]
     coverage_boost_log: list[str] = []
@@ -775,9 +840,14 @@ def render_tailored_cv(
         and coverage < payload.target_keyword_coverage
         and missing
     ):
-        for _ in range(payload.max_boost_iterations):
+        for _bi in range(payload.max_boost_iterations):
             if coverage >= payload.target_keyword_coverage or not missing:
                 break
+            _emit(
+                "boost",
+                f"Boosting keyword coverage (round {_bi + 1})",
+                coverage=round(coverage, 2),
+            )
             boosted_lib, log = boost_coverage(
                 library=library_out, job=job, missing_keywords=missing,
             )
@@ -796,6 +866,8 @@ def render_tailored_cv(
 
     # If we boosted, we skipped PDF compilation each loop — compile now
     # on the final library so the user gets the latest content.
+    if payload.compile_pdf:
+        _emit("compile", "Compiling the PDF")
     if iterations_done > 0 and payload.compile_pdf:
         result, covered, missing, coverage = _render_and_score(library_out)
         # Re-run with compile_pdf=true.
@@ -857,6 +929,8 @@ def render_tailored_cv(
             pc = _count_pdf_pages_b64(result.pdf_b64)
             if pc <= target_pages:
                 break
+            if _shrink_iter == 0:
+                _emit("fit", "Trimming to fit the page limit")
             cut_applied = False
             # Phase 1
             if caps[1] > 0:
@@ -942,6 +1016,8 @@ def render_tailored_cv(
     company = _kebab(job.company if job and job.company else "")
     today = _date.today().isoformat()
     filename = f"cv-{candidate}-{company}-{today}".replace("--", "-").strip("-")
+
+    _emit("done", "Done", used_llm=used_llm, coverage=round(coverage, 2))
 
     return RenderCVResponse(
         latex=result.latex,

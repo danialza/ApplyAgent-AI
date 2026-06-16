@@ -420,6 +420,9 @@ export interface RenderCVRequest {
   /** When false, skips the 2-page shrink loop so the PDF can run long.
    *  Used by the master-CV export. Default true. */
   enforce_page_cap?: boolean;
+  /** Client-generated id to receive live stage events over SSE
+   *  (GET /api/cv/render/progress/{id}). */
+  progress_id?: string;
 }
 
 export interface SectionPlanOut {

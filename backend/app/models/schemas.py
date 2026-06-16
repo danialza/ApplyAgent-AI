@@ -566,6 +566,10 @@ class RenderCVRequest(BaseModel):
     # master-CV PDF export, which wants the full record on as many
     # pages as it takes. Default True keeps tailored renders bounded.
     enforce_page_cap: bool = True
+    # Optional client-generated id. When set, the renderer emits live
+    # stage events to the progress bus; the UI subscribes via
+    # GET /api/cv/render/progress/{id} (SSE) to show a progress bar.
+    progress_id: str = ""
 
 
 class RenderCVResponse(BaseModel):

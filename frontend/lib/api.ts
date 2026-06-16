@@ -16,8 +16,13 @@ import type {
   RenderCVResponse,
 } from "./types";
 
-const API_BASE =
+export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
+
+/** URL for the render-progress SSE stream (GET, EventSource-friendly). */
+export function renderProgressUrl(progressId: string): string {
+  return `${API_BASE}/api/cv/render/progress/${encodeURIComponent(progressId)}`;
+}
 
 class ApiError extends Error {
   status: number;
@@ -444,4 +449,4 @@ export async function deleteNotesSource(id: number): Promise<void> {
   }
 }
 
-export { ApiError, API_BASE };
+export { ApiError };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   checkDuplicateApplication,
   convertCVTextToMarkdown,
@@ -11,6 +11,7 @@ import {
   fetchLLMStatus,
   putCVLibrary,
   renderCV,
+  renderProgressUrl,
   uploadMarkdownCV,
 } from "@/lib/api";
 import type {
@@ -64,6 +65,22 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
   const [coverageTarget, setCoverageTarget] = useState(0.8);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<RenderCVResponse | null>(null);
+  // Live render progress (SSE). stage = current human label; elapsed = seconds.
+  const [renderStage, setRenderStage] = useState<string>("");
+  const [renderElapsed, setRenderElapsed] = useState(0);
+  const esRef = useRef<EventSource | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function stopProgress() {
+    esRef.current?.close();
+    esRef.current = null;
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setRenderStage("");
+    setRenderElapsed(0);
+  }
 
   // Library editor state — toggleable JSON textarea so the user can paste
   // in new projects / publications / certs without leaving the page.
@@ -198,6 +215,9 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Close any open SSE stream / timer when the panel unmounts.
+  useEffect(() => stopProgress, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -299,6 +319,34 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
     } else {
       setDuplicate(null);
     }
+    // Open the live-progress SSE stream before POSTing so we catch the
+    // first stage event. Best-effort — render still works if SSE fails.
+    const pid =
+      (typeof crypto !== "undefined" && crypto.randomUUID?.()) ||
+      `r-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setRenderStage("Starting…");
+    setRenderElapsed(0);
+    const startedAt = Date.now();
+    timerRef.current = setInterval(
+      () => setRenderElapsed(Math.round((Date.now() - startedAt) / 1000)),
+      1000
+    );
+    try {
+      const es = new EventSource(renderProgressUrl(pid));
+      esRef.current = es;
+      es.onmessage = (e) => {
+        try {
+          const ev = JSON.parse(e.data);
+          if (ev.label) setRenderStage(ev.label);
+          if (ev.stage === "done") es.close();
+        } catch {
+          /* ignore malformed event */
+        }
+      };
+      es.onerror = () => es.close();
+    } catch {
+      /* EventSource unsupported — skip progress UI */
+    }
     try {
       const data = await renderCV({
         job_text: jobText.trim(),
@@ -316,6 +364,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
         enhance_tailor: enhanceTailor,
         pinned_project_titles: pinnedTitles,
         pinned_rank: pinnedRank,
+        progress_id: pid,
       });
       setResult(data);
       if (data.compile_error && !data.compiled) {
@@ -329,6 +378,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
     } catch (err) {
       onError(err instanceof Error ? err.message : "Render failed.");
     } finally {
+      stopProgress();
       setBusy(false);
     }
   }
@@ -701,6 +751,20 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
           {busy ? "Rendering…" : "Render tailored CV"}
         </button>
       </div>
+
+      {/* Live render progress — driven by the SSE stage stream. Shows
+          the current pipeline stage + elapsed seconds so a long
+          subscription render doesn't look frozen. */}
+      {busy && renderStage && (
+        <div className="flex items-center gap-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-900">
+          <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-brand-300 border-t-brand-700" />
+          <span className="font-semibold">{renderStage}</span>
+          <span className="ml-auto tabular-nums text-brand-700">
+            {Math.floor(renderElapsed / 60)}:
+            {String(renderElapsed % 60).padStart(2, "0")}
+          </span>
+        </div>
+      )}
 
       {/* Advanced override — pin exact counts and skip the planner for
           that field. -1 means "follow planner". */}
