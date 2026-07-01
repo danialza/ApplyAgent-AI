@@ -37,7 +37,7 @@ DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
 DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5"
 ANTHROPIC_API_VERSION = "2023-06-01"
-ANTHROPIC_MAX_TOKENS = 4096
+ANTHROPIC_MAX_TOKENS = 8192
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_TIMEOUT = 30.0
 
@@ -502,6 +502,14 @@ def _chat_completion_anthropic(
     )
     if not deprecates_temp:
         payload["temperature"] = 0.1
+    # Disable extended thinking. Sonnet 5 (and other 5-series models)
+    # turn reasoning ON by default; for our structured JSON-extraction
+    # calls that's pure waste — worse, on a big prompt the model can
+    # spend the ENTIRE max_tokens budget on thinking, hit the cap, and
+    # emit only a `thinking` block with no `text` answer (→ "LLM
+    # returned non-JSON output"). We never want reasoning here, so turn
+    # it off. Accepted (and a harmless no-op) on non-thinking models.
+    payload["thinking"] = {"type": "disabled"}
     if system_parts:
         payload["system"] = "\n\n".join(system_parts)
 
