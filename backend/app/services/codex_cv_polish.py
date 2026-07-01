@@ -96,7 +96,14 @@ _SYSTEM = (
     "actual term ('sim-to-real', 'real-hardware', 'multi-GPU'), but "
     "don't invent '-style', '-inspired', '-aware', '-friendly', "
     "'-oriented' modifiers to sound technical. Recruiters skim — "
-    "natural sentences read faster than dash-glued chains."
+    "natural sentences read faster than dash-glued chains. "
+    "(8) NEVER REFERENCE THE JOB POSTING OR EXPLAIN YOUR EDITS. The "
+    "output is finished CV prose, not a rationale. NEVER write phrases "
+    "like 'the JD requires', \"mirroring the JD's requirements\", 'to "
+    "match the role', 'as the job description asks', 'aligned with the "
+    "posting', or any mention of 'the JD', 'the job description', or "
+    "'the role's requirements'. Each bullet states ONLY what the "
+    "candidate did — no meta-commentary about why it was written."
 )
 
 _USER_TEMPLATE = """\
@@ -216,7 +223,13 @@ _ENHANCE_SYSTEM = (
     "(7) Every bullet must anchor on a concrete signal: a named tool, "
     "a measurable outcome, a named system, or a domain-specific verb. "
     "(8) WRITE NATURAL PROSE. Avoid hyphen-chain modifiers ('CLIP-style', "
-    "'PaliGemma-inspired') — use natural phrasing."
+    "'PaliGemma-inspired') — use natural phrasing. "
+    "(9) NEVER REFERENCE THE JOB POSTING OR EXPLAIN YOUR EDITS. Output "
+    "finished CV prose only. NEVER write 'the JD requires', \"mirroring "
+    "the JD's requirements\", 'to match the role', 'as the job "
+    "description asks', or any mention of 'the JD' / 'the job "
+    "description' / 'the role's requirements'. Each bullet states ONLY "
+    "what the candidate did — zero meta-commentary."
 )
 
 _ENHANCE_USER_TEMPLATE = """\
@@ -400,7 +413,12 @@ def polish_library_with_llm(
     # add or delete entries.
     merged = library.model_copy(deep=True)
     if polished.summary.strip():
-        merged.summary = polished.summary.strip()
+        from app.services.text_guard import clean_text_block, has_meta
+        new_summary = clean_text_block(polished.summary.strip())
+        # Use the scrubbed summary only when it survived; otherwise keep
+        # the library's existing summary rather than ship meta-text.
+        if new_summary and not has_meta(new_summary):
+            merged.summary = new_summary
 
     _merge_projects(merged.selected_projects, polished.selected_projects, "selected_projects", enhance=enhance)
     _merge_projects(merged.additional_projects, polished.additional_projects, "additional_projects", enhance=enhance)
@@ -443,6 +461,22 @@ def _merge_extra_skills(library_groups: list, extras: list[_LLMSkillGroupRewrite
 
 # ---------- Merge helpers ----------
 
+def _clean_bullets(original: list[str], rewritten: list[str]) -> list[str]:
+    """Scrub LLM meta-commentary ("...the JD requires", "mirroring the
+    JD's ... requirements") out of every rewritten bullet, pairing each
+    with its positional original so a contaminated rewrite can fall back
+    to the clean library text. Drops only fully-unsalvageable bullets."""
+    from app.services.text_guard import clean_bullet
+
+    out: list[str] = []
+    for i, rb in enumerate(rewritten):
+        ob = original[i] if i < len(original) else rb
+        cb = clean_bullet(ob, rb)
+        if cb:
+            out.append(cb)
+    return out
+
+
 def _merge_projects(library_entries: list, llm_entries: list[_LLMProjectRewrite], where: str, enhance: bool = False) -> None:
     by_title = {p.title.strip().lower(): p for p in library_entries}
     for rewrite in llm_entries:
@@ -459,13 +493,13 @@ def _merge_projects(library_entries: list, llm_entries: list[_LLMProjectRewrite]
             # Enhance mode — accept any non-empty bullet list, only
             # guarding against runaway counts (cap at original + 2).
             cap = max(1, len(target.highlights)) + 2
-            target.highlights = rewritten[:cap]
+            target.highlights = _clean_bullets(target.highlights, rewritten[:cap])
             continue
         if not _bullets_compatible(target.highlights, rewrite.highlights):
             logger.info("CV polish: project '%s' bullets incompatible (count/length); keeping originals",
                          rewrite.title)
             continue
-        target.highlights = list(rewrite.highlights)
+        target.highlights = _clean_bullets(target.highlights, list(rewrite.highlights))
 
 
 def _merge_experience(library_entries: list, llm_entries: list[_LLMExperienceRewrite], enhance: bool = False) -> None:
@@ -491,13 +525,13 @@ def _merge_experience(library_entries: list, llm_entries: list[_LLMExperienceRew
             continue
         if enhance:
             cap = max(1, len(target.highlights)) + 1
-            target.highlights = rewritten[:cap]
+            target.highlights = _clean_bullets(target.highlights, rewritten[:cap])
             continue
         if not _bullets_compatible(target.highlights, rewrite.highlights):
             logger.info("CV polish: experience '%s' bullets incompatible; keeping originals",
                          rewrite.title)
             continue
-        target.highlights = list(rewrite.highlights)
+        target.highlights = _clean_bullets(target.highlights, list(rewrite.highlights))
 
 
 # ---------- JSON coercion ----------

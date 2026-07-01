@@ -92,6 +92,11 @@ def boost_coverage(
         "force it. Better to leave coverage at 70% than invent.\n"
         f"4. Touch at most {MAX_BULLETS_TOUCHED_PER_CALL} bullets in total.\n"
         "5. Keep each rewritten bullet under 200 characters and one line.\n"
+        "5b. NEVER reference the job posting or explain the edit. The new "
+        "text is finished CV prose — never write 'the JD requires', "
+        "\"mirroring the JD's requirements\", 'to match the role', or any "
+        "mention of 'the JD' / 'the job description'. State only what the "
+        "candidate did.\n"
         "6. Reply with one JSON object:\n"
         "   {\"edits\": [{\"section\": \"selected_projects|"
         "additional_projects|experience\", \"index\": int, "
@@ -144,6 +149,14 @@ def boost_coverage(
         if len(clean) > 400:  # safety belt
             clean = clean[:400].rstrip() + "…"
         old = section_list[idx].highlights[bidx]
+        # Scrub JD/role meta-commentary the booster sometimes bleeds in
+        # ("...the JD requires", "mirroring the JD's requirements"). If
+        # the rewrite can't be salvaged, keep the original bullet.
+        from app.services.text_guard import clean_bullet, has_meta
+        clean = clean_bullet(old, clean)
+        if not clean or has_meta(clean):
+            log.append(f"edit_skipped: {edit.section}[{edit.index}] meta-commentary, kept original")
+            continue
         section_list[idx].highlights[bidx] = clean
         applied += 1
         log.append(

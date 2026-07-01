@@ -794,12 +794,20 @@ def render_cv(
 
     # ---- Bold + escape all bullet text in one pass.
     def render_bullet(text: str) -> str:
+        # FINAL SAFETY NET — strip any LLM meta-commentary ("...the JD
+        # requires", "mirroring the JD's requirements") before it can be
+        # typeset. Every bullet AND the summary flow through here, so a
+        # leak from ANY upstream path (polish, coverage boost, enhance,
+        # even a contaminated stored bullet) is caught at render time.
+        from app.services.text_guard import has_meta, strip_meta
+        if text and has_meta(text):
+            text = strip_meta(text)
         # Order matters: JD-skill bolding runs against the escaped
         # text first, then metric bolding catches quantified impact
         # (5+ years, 30%, $1M, 10x). _bold_metrics is nest-safe so
         # it won't double-wrap a number that happens to be inside a
         # skill term that was already bolded.
-        escaped = latex_escape(text)
+        escaped = latex_escape(text or "")
         escaped = _bold_matches(escaped, bold_terms)
         return _bold_metrics(escaped)
 
@@ -850,7 +858,7 @@ def render_cv(
                 "institution": inst,
                 "degree": deg,
                 "period": e.period,
-                "highlights": [render_bullet(h) for h in (e.highlights or [])],
+                "highlights": [r for h in (e.highlights or []) if (r := render_bullet(h))],
             })
         return out
 
@@ -868,7 +876,7 @@ def render_cv(
                 "title": title,
                 "period": p.period,
                 "url": project_url,
-                "highlights": [render_bullet(h) for h in (p.highlights or [])],
+                "highlights": [r for h in (p.highlights or []) if (r := render_bullet(h))],
             })
         return out
 
@@ -882,7 +890,7 @@ def render_cv(
                 "title": title,
                 "company": x.company,
                 "period": x.period,
-                "highlights": [render_bullet(h) for h in (x.highlights or [])],
+                "highlights": [r for h in (x.highlights or []) if (r := render_bullet(h))],
             })
         return out
 

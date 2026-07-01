@@ -44,8 +44,10 @@ RUN ARCH=$(dpkg --print-architecture) \
 WORKDIR /app
 
 # Install Python deps first so the layer caches when only app code changes.
+# --retries / --timeout make the build resilient to flaky PyPI network
+# (transient ReadTimeoutError from files.pythonhosted.org).
 COPY requirements.txt ./
-RUN pip install -r requirements.txt
+RUN pip install --retries 10 --timeout 120 -r requirements.txt
 
 # Copy the rest of the backend.
 COPY . .
