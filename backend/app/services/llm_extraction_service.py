@@ -474,7 +474,7 @@ def _chat_completion_anthropic(
         model_id = (cfg.get("model") or "").lower()
         supports_prefill = not any(
             tag in model_id for tag in (
-                "sonnet-4-6", "sonnet-4-7", "sonnet-4-8",
+                "sonnet-4-6", "sonnet-4-7", "sonnet-4-8", "sonnet-5",
                 "opus-4-6", "opus-4-7", "opus-4-8",
                 "haiku-4-6", "haiku-4-7",
             )
@@ -498,7 +498,7 @@ def _chat_completion_anthropic(
     # deprecated for this model.'). Only add it for older models.
     deprecates_temp = any(
         tag in (cfg.get("model") or "").lower()
-        for tag in ("opus-4-7", "opus-4-8", "opus-4-9", "opus-5")
+        for tag in ("opus-4-7", "opus-4-8", "opus-4-9", "opus-5", "sonnet-5")
     )
     if not deprecates_temp:
         payload["temperature"] = 0.1
