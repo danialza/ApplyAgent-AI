@@ -135,6 +135,7 @@ export default function ApplicationsPanel({ onError, refreshKey = 0 }: Props) {
                 <th className="px-2 py-1.5">How</th>
                 <th className="px-2 py-1.5">Link</th>
                 <th className="px-2 py-1.5">CV</th>
+                <th className="px-2 py-1.5">Coverage</th>
                 <th className="px-2 py-1.5">Notes</th>
                 <th className="px-2 py-1.5"></th>
               </tr>
@@ -259,6 +260,9 @@ export default function ApplicationsPanel({ onError, refreshKey = 0 }: Props) {
                       <span className="text-slate-400">-</span>
                     )}
                   </td>
+                  <td className="whitespace-nowrap px-2 py-1.5">
+                    <CoverageBadge value={r.keyword_coverage} />
+                  </td>
                   <td className="max-w-[10rem] px-2 py-1.5">
                     <TextCell
                       value={r.notes}
@@ -286,6 +290,28 @@ export default function ApplicationsPanel({ onError, refreshKey = 0 }: Props) {
 }
 
 // ---- Inline-edit primitives ----
+
+/** Keyword-coverage pill. value is 0..1, or -1 (not recorded → "—"). */
+function CoverageBadge({ value }: { value: number }) {
+  if (value == null || value < 0) {
+    return <span className="text-slate-400" title="Not recorded for this application">—</span>;
+  }
+  const pct = Math.round(value * 100);
+  const cls =
+    value >= 0.85
+      ? "bg-emerald-100 text-emerald-800 ring-emerald-200"
+      : value >= 0.6
+      ? "bg-amber-100 text-amber-800 ring-amber-200"
+      : "bg-rose-100 text-rose-700 ring-rose-200";
+  return (
+    <span
+      className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ${cls}`}
+      title="Keyword coverage of the tailored CV at track time"
+    >
+      {pct}%
+    </span>
+  );
+}
 
 function TextCell({
   value,

@@ -75,6 +75,11 @@ def _to_out(row: Application) -> ApplicationOut:
         url=row.url or "",
         notes=row.notes or "",
         jd_hash=row.jd_hash or "",
+        keyword_coverage=(
+            row.keyword_coverage
+            if getattr(row, "keyword_coverage", None) is not None
+            else -1.0
+        ),
         has_cv_latex=bool(getattr(row, "cv_latex", "") or ""),
         has_cv_pdf=bool(getattr(row, "cv_pdf_b64", "") or ""),
         has_jd=bool((getattr(row, "jd_text", "") or "").strip()),
@@ -120,6 +125,11 @@ def create_application(
         cv_latex=payload.cv_latex or "",
         cv_pdf_b64=payload.cv_pdf_b64 or "",
         cv_filename=payload.cv_filename or "",
+        keyword_coverage=(
+            payload.keyword_coverage
+            if payload.keyword_coverage is not None
+            else -1.0
+        ),
     )
     db.add(row)
     db.commit()
@@ -315,10 +325,12 @@ def export_csv(db: Session = Depends(get_db)) -> StreamingResponse:
     """
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["When", "DeadLine", "Where?", "What?", "Status", "How", "Link", "Notes"])
+    writer.writerow(["When", "DeadLine", "Where?", "What?", "Status", "How", "Link", "Coverage", "Notes"])
 
     rows = db.query(Application).order_by(desc(Application.created_at)).all()
     for r in rows:
+        cov = getattr(r, "keyword_coverage", -1.0)
+        cov_str = f"{round(cov * 100)}%" if cov is not None and cov >= 0 else "-"
         writer.writerow([
             r.apply_date or "-",
             r.deadline or "-",
@@ -327,6 +339,7 @@ def export_csv(db: Session = Depends(get_db)) -> StreamingResponse:
             r.status or "-",
             r.how or "-",
             r.url or "-",
+            cov_str,
             (r.notes or "").replace("\n", " ").strip() or "-",
         ])
     buf.seek(0)

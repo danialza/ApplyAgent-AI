@@ -82,6 +82,7 @@ def _add_missing_columns() -> None:
         ("applications", "cv_latex", "TEXT", "''"),
         ("applications", "cv_pdf_b64", "TEXT", "''"),
         ("applications", "cv_filename", "VARCHAR(255)", "''"),
+        ("applications", "keyword_coverage", "REAL", "-1.0"),
     ]
     # web_sources table is a new entity in this build; create_all
     # handles it. Nothing to ALTER for now.

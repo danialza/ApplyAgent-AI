@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
@@ -223,6 +223,9 @@ class Application(Base):
     cv_latex: Mapped[str] = mapped_column(Text, nullable=False, default="")
     cv_pdf_b64: Mapped[str] = mapped_column(Text, nullable=False, default="")
     cv_filename: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    # Keyword coverage (0..1) of the tailored CV at track time. -1 =
+    # not recorded (rows created before this column existed).
+    keyword_coverage: Mapped[float] = mapped_column(Float, nullable=False, default=-1.0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )

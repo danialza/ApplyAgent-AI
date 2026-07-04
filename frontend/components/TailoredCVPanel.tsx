@@ -275,6 +275,11 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
       cv_latex: skip ? "" : result.latex || "",
       cv_pdf_b64: skip ? "" : result.pdf_b64 || "",
       cv_filename: skip ? "" : result.suggested_filename || "tailored-cv",
+      // Persist the coverage of this render so the tracker shows it.
+      keyword_coverage:
+        typeof result.keyword_coverage === "number"
+          ? result.keyword_coverage
+          : -1,
     };
     try {
       await createApplication(payload);

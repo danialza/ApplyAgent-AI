@@ -11,6 +11,8 @@ export interface Application {
   url: string;
   notes: string;
   jd_hash: string;
+  /** Keyword coverage of the tailored CV at track time (0..1). -1 = not recorded. */
+  keyword_coverage: number;
   has_cv_latex: boolean;
   has_cv_pdf: boolean;
   has_jd: boolean;

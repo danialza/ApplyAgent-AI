@@ -727,6 +727,9 @@ class ApplicationBase(BaseModel):
     how: str = ""
     url: str = ""
     notes: str = ""
+    # Keyword coverage of the tailored CV at track time (0..1).
+    # -1 = not recorded (rows tracked before this field existed).
+    keyword_coverage: float = -1.0
 
 
 class ApplicationCreate(ApplicationBase):
