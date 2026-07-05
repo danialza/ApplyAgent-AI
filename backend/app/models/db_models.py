@@ -232,3 +232,61 @@ class Application(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
+
+
+# ---------- Batch autopilot ----------
+
+class BatchItem(Base):
+    """One URL in a batch-autopilot run.
+
+    The worker walks queued items: fetch the JD from `url`, parse
+    company/role, detect knowledge gaps (→ questions), render a tailored
+    CV, and save it to the Applications tracker. Status drives the UI.
+    """
+    __tablename__ = "batch_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_id: Mapped[str] = mapped_column(String(40), nullable=False, default="", index=True)
+    url: Mapped[str] = mapped_column(String(2048), nullable=False, default="")
+    # queued | fetching | needs_input | rendering | done | failed | duplicate
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
+    company: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    role: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    jd_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Open questions the gap detector raised: [{"key","question"}]
+    pending_questions: Mapped[list[Any]] = mapped_column(JSON, nullable=False, default=list)
+    # Gap detection runs ONCE per item. After the first pass (whether or
+    # not it raised questions) this is set, so a resumed/retried item
+    # goes straight to rendering instead of re-asking with new keys.
+    gaps_checked: Mapped[bool] = mapped_column(Integer, nullable=False, default=0)
+    keyword_coverage: Mapped[float] = mapped_column(Float, nullable=False, default=-1.0)
+    application_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class CandidateFact(Base):
+    """A durable answer the user gave to a clarifying question.
+
+    The gap detector normalises each question to a stable `key`
+    (e.g. "years_typescript", "work_auth_uk"). When a later JD raises the
+    same key, the worker answers it from here instead of asking again —
+    the system's growing memory.
+    """
+    __tablename__ = "candidate_facts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    answer: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )

@@ -307,6 +307,69 @@ export function applicationsCsvUrl(): string {
   return `${API_BASE}/api/applications/export.csv`;
 }
 
+// ---------- Batch autopilot ----------
+
+export interface BatchItem {
+  id: number;
+  batch_id: string;
+  url: string;
+  status: string;
+  company: string;
+  role: string;
+  pending_questions: { key: string; question: string }[];
+  keyword_coverage: number;
+  application_id: number;
+  error: string;
+}
+
+export interface CandidateFact {
+  key: string;
+  question: string;
+  answer: string;
+}
+
+export async function startBatch(urls: string[]): Promise<{ batch_id: string; items: BatchItem[] }> {
+  const res = await fetch(`${API_BASE}/api/batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ urls }),
+  });
+  return handle(res);
+}
+
+export async function fetchBatch(batchId: string): Promise<{ batch_id: string; items: BatchItem[] }> {
+  const url = batchId
+    ? `${API_BASE}/api/batch/${batchId}`
+    : `${API_BASE}/api/batch/latest`;
+  const res = await fetch(url, { cache: "no-store" });
+  return handle(res);
+}
+
+export async function answerBatchQuestions(
+  answers: { key: string; question: string; answer: string }[]
+): Promise<{ stored: number; resumed_items: number }> {
+  const res = await fetch(`${API_BASE}/api/batch/answer`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answers }),
+  });
+  return handle(res);
+}
+
+export async function retryBatchItem(id: number): Promise<BatchItem> {
+  const res = await fetch(`${API_BASE}/api/batch/item/${id}/retry`, { method: "POST" });
+  return handle(res);
+}
+
+export async function fetchFacts(): Promise<CandidateFact[]> {
+  const res = await fetch(`${API_BASE}/api/facts`, { cache: "no-store" });
+  return handle(res);
+}
+
+export async function deleteFact(key: string): Promise<void> {
+  await fetch(`${API_BASE}/api/facts/${encodeURIComponent(key)}`, { method: "DELETE" });
+}
+
 export function applicationCvTexUrl(id: number): string {
   return `${API_BASE}/api/applications/${id}/cv.tex`;
 }

@@ -144,6 +144,32 @@ claude-seed-from-main: ## (obsolete) The stacks now SHARE one DB volume — noth
 	@echo "Both stacks share the applyagentai_backend_data volume now."
 	@echo "Data is always in sync; no seeding needed."
 
+# ---- Batch-autopilot stack (parallel, ports 3200 / 8200) ----
+# Isolated 3rd stack for the batch autopilot (section 7). Shares the DB
+# volume so results land in the same tracker. Uses the API key from
+# .env. The 3000/3100 stacks are untouched.
+
+BATCH_COMPOSE := docker compose -f docker-compose.batch.yml $(COMPOSE_ENV_FILES)
+
+.PHONY: batch-up
+batch-up: ## Build + start the batch-autopilot stack (3200 / 8200).
+	$(COMPOSE_UNSET) $(BATCH_COMPOSE) up --build -d
+	@echo ""
+	@echo "Batch Backend  → http://localhost:8200  (docs at /docs)"
+	@echo "Batch Frontend → http://localhost:3200"
+
+.PHONY: batch-down
+batch-down: ## Stop the batch stack (shared DB volume preserved).
+	$(COMPOSE_UNSET) $(BATCH_COMPOSE) down
+
+.PHONY: batch-logs
+batch-logs: ## Tail the batch stack logs.
+	$(COMPOSE_UNSET) $(BATCH_COMPOSE) logs -f --tail=100
+
+.PHONY: batch-clean
+batch-clean: ## Stop the batch stack + remove ONLY its own caches (never the shared DB).
+	$(COMPOSE_UNSET) $(BATCH_COMPOSE) down -v
+
 # ---- Help ----
 
 .PHONY: help

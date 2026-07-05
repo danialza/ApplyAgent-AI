@@ -1,0 +1,85 @@
+# AI Job-CV Matching Agent — BATCH-AUTOPILOT variant.
+#
+# An isolated third stack for testing the batch autopilot (section 7)
+# WITHOUT touching the stacks you use day-to-day (3000/8000 API-key,
+# 3100/8100 subscription). It shares the same database volume, so JDs it
+# tailors land in the SAME Applications tracker.
+#
+#     make batch-up      # build + start on 3200 / 8200
+#     make batch-down
+#
+# Frontend → http://localhost:3200
+# Backend  → http://localhost:8200   (Swagger at /docs)
+#
+# LLM: uses the ANTHROPIC_API_KEY from .env (batch = many renders, so
+# the billed API is more reliable than the subscription session limit).
+
+name: applyagent-batch
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: ai-job-cv-matcher-backend-batch
+    container_name: ai-job-cv-backend-batch
+    restart: unless-stopped
+    ports:
+      - "${BATCH_BACKEND_PORT:-8200}:8000"
+    environment:
+      APP_DB_URL: sqlite:////data/app.db
+      APP_INDEX_DIR: /data/index
+      APP_CORS_ORIGINS: ${BATCH_CORS_ORIGINS:-http://localhost:3200}
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
+
+      USE_LLM_EXTRACTION: ${USE_LLM_EXTRACTION:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-120}
+      LATEX_COMPILE_TIMEOUT_SECONDS: ${LATEX_COMPILE_TIMEOUT_SECONDS:-180}
+      XDG_CACHE_HOME: /data/tectonic_cache
+      APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+    volumes:
+      # SHARED database — same volume as the API-key stack, so batch
+      # results land in the one tracker. external:true keeps
+      # `batch-clean` from ever deleting it.
+      - applyagentai_backend_data:/data
+      - hf_cache_batch:/data/hf_cache
+      - ./docs:/app/docs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${BATCH_NEXT_PUBLIC_API_URL:-http://localhost:8200}
+    image: ai-job-cv-matcher-frontend-batch
+    container_name: ai-job-cv-frontend-batch
+    restart: unless-stopped
+    ports:
+      - "${BATCH_FRONTEND_PORT:-3200}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  applyagentai_backend_data:
+    external: true
+  hf_cache_batch:

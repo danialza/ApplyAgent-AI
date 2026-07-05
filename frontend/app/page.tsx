@@ -7,6 +7,7 @@ import LoadingState from "@/components/LoadingState";
 import ManualJobInput from "@/components/ManualJobInput";
 import MatchResults from "@/components/MatchResults";
 import ApplicationsPanel from "@/components/ApplicationsPanel";
+import BatchAutopilotPanel from "@/components/BatchAutopilotPanel";
 import TailoredCVPanel from "@/components/TailoredCVPanel";
 import UnifiedSourcePanel from "@/components/UnifiedSourcePanel";
 import { listCVs, matchAll } from "@/lib/api";
@@ -180,6 +181,11 @@ export default function HomePage() {
         </div>
         <ApplicationsPanel onError={setError} refreshKey={trackerRefreshKey} />
       </section>
+
+      <BatchAutopilotPanel
+        onError={setError}
+        onApplicationTracked={() => setTrackerRefreshKey((n) => n + 1)}
+      />
 
       <footer className="pt-6 text-center text-xs text-slate-400">
         Backend: FastAPI · NLP: sentence-transformers + FAISS
