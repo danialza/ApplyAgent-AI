@@ -307,6 +307,48 @@ export function applicationsCsvUrl(): string {
   return `${API_BASE}/api/applications/export.csv`;
 }
 
+// ---------- Metrics harvester + cover letter ----------
+
+export interface MetricQuestion {
+  section: string;
+  index: number;
+  bullet_index: number;
+  key: string;
+  question: string;
+}
+
+export async function fetchMetricQuestions(): Promise<MetricQuestion[]> {
+  const res = await fetch(`${API_BASE}/api/cv/metrics/questions`, { cache: "no-store" });
+  const data = await handle<{ questions: MetricQuestion[] }>(res);
+  return data.questions || [];
+}
+
+export async function applyMetricAnswers(
+  answers: (MetricQuestion & { answer: string })[]
+): Promise<{ applied: { key: string; rewritten: string }[] }> {
+  const res = await fetch(`${API_BASE}/api/cv/metrics/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answers }),
+  });
+  return handle(res);
+}
+
+export async function generateCoverLetter(input: {
+  job_text: string;
+  tone?: string;
+  length?: "short" | "standard" | "long";
+  extra_notes?: string;
+}): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/cv/cover-letter`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await handle<{ cover_letter: string }>(res);
+  return data.cover_letter || "";
+}
+
 // ---------- Batch autopilot ----------
 
 export interface BatchItem {

@@ -460,6 +460,9 @@ export interface RenderCVResponse {
   keywords_covered: string[];
   keywords_missing: string[];
   suggested_filename: string;
+  /** ATS parseability of the compiled PDF, 0-100. -1 = not checked. */
+  ats_score?: number;
+  ats_issues?: string[];
   section_plan?: SectionPlanOut;
   job_title?: string;
   job_company?: string;

@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import {
   addLibraryProject,
   applyLibraryFix,
+  applyMetricAnswers,
   fetchCVLibrary,
   fetchLibraryIssues,
+  fetchMetricQuestions,
   ignoreIssue,
   putCVLibrary,
   rebuildLibraryForce,
@@ -13,6 +15,7 @@ import {
   unignoreAllIssues,
   unlockLibrary,
   type LibraryIssue,
+  type MetricQuestion,
 } from "@/lib/api";
 import type { CVLibrary } from "@/lib/types";
 
@@ -457,6 +460,8 @@ export default function MasterCVPreview({ refreshKey = 0, sourceLabels = {} }: P
 
       <AddProjectCard onAdded={() => window.location.reload()} />
 
+      <MetricsHarvestCard onApplied={() => window.location.reload()} />
+
       {/* Entry sections — collapsible, per-entry source chips + delete.
           Delete posts a drop_entry user-patch (survives rebuilds). */}
       <EntryList
@@ -748,6 +753,111 @@ function AddProjectCard({ onAdded }: { onAdded: () => void }) {
           {busy ? "Enriching…" : "Generate + Add"}
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Metrics harvester — asks for real numbers on unquantified bullets,
+ *  weaves them in via LLM, persists as user-patches. Each answer is
+ *  remembered (candidate_facts) so it's never asked twice. */
+function MetricsHarvestCard({ onApplied }: { onApplied: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [questions, setQuestions] = useState<MetricQuestion[]>([]);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [applying, setApplying] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function load() {
+    setOpen(true);
+    setLoading(true);
+    setErr(null);
+    try {
+      setQuestions(await fetchMetricQuestions());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to load questions.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function apply() {
+    const payload = questions
+      .filter((q) => (answers[q.key] || "").trim())
+      .map((q) => ({ ...q, answer: answers[q.key].trim() }));
+    if (payload.length === 0) {
+      setErr("Answer at least one question (skip the ones you don't know).");
+      return;
+    }
+    setApplying(true);
+    setErr(null);
+    try {
+      const res = await applyMetricAnswers(payload);
+      if ((res.applied || []).length > 0) {
+        onApplied();
+      } else {
+        setErr("No bullets were updated — try rephrasing an answer with a concrete number.");
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Apply failed.");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="rounded-lg border border-dashed border-emerald-300 bg-emerald-50 p-2 text-xs">
+        <button
+          type="button"
+          onClick={load}
+          className="font-semibold text-emerald-700 hover:text-emerald-900"
+        >
+          📈 Strengthen with numbers (recruiters rank quantified impact first)
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs">
+      <div className="flex items-center justify-between">
+        <span className="font-semibold text-emerald-900">
+          Strengthen with numbers
+        </span>
+        <button type="button" onClick={() => setOpen(false)} className="text-slate-500 hover:text-slate-800">✕</button>
+      </div>
+      <p className="text-emerald-800">
+        Answer with a real number (estimate honestly). Each answer is woven into
+        its bullet, saved permanently, and never asked again.
+      </p>
+      {loading && <p className="text-slate-500">Scanning bullets…</p>}
+      {!loading && questions.length === 0 && (
+        <p className="text-slate-600">Nothing to ask — every bullet already carries a number, or the LLM found no gaps worth quantifying. ✓</p>
+      )}
+      {questions.map((q) => (
+        <label key={q.key} className="block">
+          <span className="font-medium text-slate-700">{q.question}</span>
+          <input
+            type="text"
+            value={answers[q.key] || ""}
+            onChange={(e) => setAnswers((a) => ({ ...a, [q.key]: e.target.value }))}
+            placeholder="e.g. ~40% faster · 2K queries/day · 12 analysts"
+            className="mt-1 w-full rounded border border-emerald-300 px-2 py-1"
+          />
+        </label>
+      ))}
+      {err && <p className="text-rose-600">{err}</p>}
+      {questions.length > 0 && (
+        <button
+          type="button"
+          onClick={apply}
+          disabled={applying}
+          className="rounded bg-emerald-600 px-3 py-1.5 font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+        >
+          {applying ? "Weaving numbers in…" : "Apply to master CV"}
+        </button>
+      )}
     </div>
   );
 }

@@ -325,6 +325,64 @@ def add_project(payload: dict, db: Session = Depends(get_db)) -> CVLibraryOut:
     return _to_out(row)
 
 
+@router.get("/metrics/questions")
+def metrics_questions(db: Session = Depends(get_db)) -> dict:
+    """Scan the master library for unquantified bullets and return the
+    LLM's best metric-eliciting questions. Answered keys are skipped."""
+    from app.services.metrics_harvester import generate_questions
+    return {"questions": generate_questions(db)}
+
+
+@router.post("/metrics/apply")
+def metrics_apply(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """Apply answered metric questions to the master library.
+
+    Body: {"answers": [{section, index, bullet_index, key, question,
+    answer}]}. Each answer is woven into its bullet by the LLM and
+    persisted as a user-patch (survives rebuilds); the fact is also
+    remembered so it's never asked again.
+    """
+    from app.services.metrics_harvester import apply_answer
+
+    results = []
+    for a in (payload or {}).get("answers", []):
+        if not (a.get("answer") or "").strip():
+            continue
+        rewritten = apply_answer(
+            db,
+            section=a.get("section", ""),
+            index=int(a.get("index", -1)),
+            bullet_index=int(a.get("bullet_index", -1)),
+            key=a.get("key", ""),
+            question=a.get("question", ""),
+            answer=a.get("answer", ""),
+        )
+        results.append({"key": a.get("key", ""), "rewritten": rewritten or ""})
+    return {"applied": [r for r in results if r["rewritten"]], "results": results}
+
+
+@router.post("/cover-letter")
+def cover_letter(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """Generate a plain-text cover letter for a JD, grounded in the
+    master library. Body: {"job_text": str, "tone"?: str, "length"?:
+    "short"|"standard"|"long", "extra_notes"?: str}."""
+    from app.services.cover_letter import generate_cover_letter
+
+    row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No CV library yet.")
+    text, err = generate_cover_letter(
+        library=_to_out(row),
+        job_text=(payload or {}).get("job_text", ""),
+        tone=(payload or {}).get("tone", "professional"),
+        length=(payload or {}).get("length", "standard"),
+        extra_notes=(payload or {}).get("extra_notes", ""),
+    )
+    if not text:
+        raise HTTPException(status_code=502, detail=err or "Generation failed.")
+    return {"cover_letter": text}
+
+
 @router.post("/library/unlock", response_model=CVLibraryOut)
 def unlock_library(db: Session = Depends(get_db)) -> CVLibraryOut:
     """Clear the manual-edit lock. Library content stays the same
@@ -811,6 +869,8 @@ def render_tailored_cv(
             core_competencies_override=core_competencies_override,
             pinned_project_titles=_pinned_titles,
             pinned_rank=_pinned_rank,
+            max_certifications=plan.max_certifications,
+            max_publications=plan.max_publications,
         )
         latex_low_local = r.latex.lower()
         cov_list: list[str] = []
@@ -883,6 +943,8 @@ def render_tailored_cv(
             core_competencies_override=core_competencies_override,
             pinned_project_titles=_pinned_titles,
             pinned_rank=_pinned_rank,
+            max_certifications=plan.max_certifications,
+            max_publications=plan.max_publications,
         )
     elif iterations_done == 0 and payload.compile_pdf:
         # First-pass render skipped PDF; compile now.
@@ -897,6 +959,8 @@ def render_tailored_cv(
             core_competencies_override=core_competencies_override,
             pinned_project_titles=_pinned_titles,
             pinned_rank=_pinned_rank,
+            max_certifications=plan.max_certifications,
+            max_publications=plan.max_publications,
         )
 
     # ---- Page-fit loop: enforce target_length as a hard page cap.
@@ -996,6 +1060,8 @@ def render_tailored_cv(
                 core_competencies_override=core_competencies_override,
                 pinned_project_titles=_pinned_titles,
                 pinned_rank=_pinned_rank,
+            max_certifications=plan.max_certifications,
+            max_publications=plan.max_publications,
             )
             if not result.compiled:
                 break
@@ -1018,6 +1084,17 @@ def render_tailored_cv(
     today = _date.today().isoformat()
     filename = f"cv-{candidate}-{company}-{today}".replace("--", "-").strip("-")
 
+    # ---- ATS parseability check on the final PDF. Deterministic and
+    # fast (~100ms); tells the user whether an ATS re-extraction keeps
+    # the contact line, section headers, and clean glyphs.
+    ats_score, ats_issues = -1, []
+    if result.compiled and result.pdf_b64:
+        from app.services.ats_check import check_pdf_b64
+        ats_score, ats_issues = check_pdf_b64(
+            result.pdf_b64,
+            header=library_out.header.model_dump() if library_out.header else {},
+        )
+
     _emit("done", "Done", used_llm=used_llm, coverage=round(coverage, 2))
 
     return RenderCVResponse(
@@ -1033,10 +1110,14 @@ def render_tailored_cv(
         keywords_covered=covered,
         keywords_missing=missing,
         suggested_filename=filename or "tailored-cv",
+        ats_score=ats_score,
+        ats_issues=ats_issues,
         section_plan={
             "max_selected_projects": plan.max_selected_projects,
             "max_additional_projects": plan.max_additional_projects,
             "max_experience": plan.max_experience,
+            "max_certifications": plan.max_certifications,
+            "max_publications": plan.max_publications,
             "source": plan.source,
             "rationale": plan.rationale,
         },

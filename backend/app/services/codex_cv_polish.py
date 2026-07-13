@@ -126,12 +126,18 @@ TAILOR THIS CV TO THIS JOB. Run the 7-step career-ops pipeline exactly:
            NLP Engineer (transformers + tokenisation + LLM training)
            Full-stack AI (frontend + backend + ML)
 
-           HARD: Open the Summary line with the EXACT archetype noun
-           phrase from the JD's vocabulary. If JD title is "Senior
-           Robot Learning Engineer", Summary MUST start with "Robot
-           learning engineer" / "Senior robot learning engineer", NOT
-           "Applied AI engineer" or "Software engineer". Misidentifying
-           the archetype is the #1 reason recruiters skip a CV.
+           HARD: Open the Summary with the JD's EXACT job title string
+           (lowercase the leading article as grammar needs). JD says
+           "AI Engineer" → Summary starts "AI engineer with…"; JD says
+           "Senior Robot Learning Engineer" → "Senior robot learning
+           engineer…". Use the exact title whenever it honestly
+           describes the candidate; only fall back to the nearest
+           archetype noun when the exact title would be a false claim
+           (e.g. "Engineering Manager" for an IC). NEVER open with a
+           different generic archetype when the exact title fits —
+           recruiters and ATS rank the first line's title match above
+           everything else, and a mismatch is the #1 reason a CV is
+           skipped in the 7-second scan.
   STEP 3 — Rewrite the Professional Summary in 3-4 lines, NO first-
            person pronouns. After the archetype opener, thread in the
            top 5 JD keywords by paraphrasing existing library claims.
@@ -239,8 +245,11 @@ to maximise JD-fit. Run this pipeline:
 
   STEP 1 — Extract 20-25 canonical keywords from the JD (skills + tools
            + role terms + domain nouns). Use exact JD form.
-  STEP 2 — Detect archetype from JD keyword density. Open the rewritten
-           Summary with the EXACT archetype noun phrase from the JD.
+  STEP 2 — Open the rewritten Summary with the JD's EXACT job title
+           string (e.g. "AI Developer with…") whenever it honestly fits
+           the candidate; fall back to the nearest archetype noun only
+           when the exact title would be a false claim. The first line's
+           title match is what recruiters and ATS rank first.
   STEP 3 — Rewrite the Professional Summary in 3-5 lines, no first-
            person pronouns. Thread in top 7-8 JD keywords. End with
            what the candidate ships / builds / improves.

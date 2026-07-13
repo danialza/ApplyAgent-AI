@@ -590,6 +590,10 @@ class RenderCVResponse(BaseModel):
     # Filename composed from candidate + company + date (kebab-case),
     # matching career-ops's `cv-{candidate}-{company}-{YYYY-MM-DD}.pdf`.
     suggested_filename: str = ""
+    # ATS parseability of the compiled PDF: 0-100 (-1 = not checked,
+    # e.g. PDF compilation skipped) + human-readable issues found.
+    ats_score: int = -1
+    ats_issues: list[str] = Field(default_factory=list)
     # What the section planner actually chose, so the UI can show
     # "Auto picked 3 / 2 / 3 — mid-level JD, fits two pages".
     section_plan: dict = Field(default_factory=dict)

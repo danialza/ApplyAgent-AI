@@ -37,6 +37,11 @@ class SectionPlan:
     max_experience: int
     source: str            # "user_override" | "one_page" | "two_page" | "llm" | "llm_fallback"
     rationale: str = ""
+    # Signal curation — recruiters read low-weight certs / a wall of
+    # "under submission" publications as noise on senior applications.
+    # The LLM planner trims these per-JD; presets keep everything.
+    max_certifications: int = 8
+    max_publications: int = 4
 
 
 # Hard-coded defaults per page target. Tuned to Danial's onecolentry
@@ -78,6 +83,8 @@ _LLM_BOUNDS = {
     "max_selected_projects": (1, 6),
     "max_additional_projects": (0, 4),
     "max_experience": (1, 6),
+    "max_certifications": (0, 8),
+    "max_publications": (0, 4),
 }
 
 
@@ -157,11 +164,18 @@ def _llm_plan(library: CVLibraryOut, job: JobParsed | None) -> SectionPlan | Non
         "so it fits a clean two-page maximum and matches the job's seniority. "
         "Reply with one JSON object of the shape:\n"
         '{"max_selected_projects": int, "max_additional_projects": int, '
-        '"max_experience": int, "rationale": "one short sentence"}\n'
-        "Bounds: selected 1..6, additional 0..4, experience 1..6.\n"
+        '"max_experience": int, "max_certifications": int, '
+        '"max_publications": int, "rationale": "one short sentence"}\n'
+        "Bounds: selected 1..6, additional 0..4, experience 1..6, "
+        "certifications 0..8, publications 0..4.\n"
         "Heuristics: junior / first-job → fewer (2/1/2). Mid → 3/2/3. "
         "Senior / staff / principal → 5/3/4. Research / academic JDs that "
-        "value publications → trim experience to 3, keep additional at 2."
+        "value publications → trim experience to 3, keep additional at 2.\n"
+        "Signal curation: for senior/staff roles keep only heavyweight "
+        "certifications (max_certifications 3-4) — intro-level courses "
+        "read as noise and invite rejection. For non-research roles cap "
+        "max_publications at 1-2 (unpublished 'under submission' walls "
+        "hurt more than help); research JDs keep all 4."
     )
     user = json.dumps({
         "job": job_summary,
@@ -186,6 +200,10 @@ def _llm_plan(library: CVLibraryOut, job: JobParsed | None) -> SectionPlan | Non
                      *_LLM_BOUNDS["max_additional_projects"])
         exp = _clamp(int(data.get("max_experience", 0)),
                      *_LLM_BOUNDS["max_experience"])
+        certs = _clamp(int(data.get("max_certifications", 8)),
+                       *_LLM_BOUNDS["max_certifications"])
+        pubs = _clamp(int(data.get("max_publications", 4)),
+                      *_LLM_BOUNDS["max_publications"])
     except (TypeError, ValueError) as exc:
         logger.warning("Section planner returned bad ints: %s", exc)
         return None
@@ -195,6 +213,8 @@ def _llm_plan(library: CVLibraryOut, job: JobParsed | None) -> SectionPlan | Non
         max_selected_projects=sel,
         max_additional_projects=add,
         max_experience=exp,
+        max_certifications=certs,
+        max_publications=pubs,
         source="llm",
         rationale=rationale or "LLM-decided caps.",
     )

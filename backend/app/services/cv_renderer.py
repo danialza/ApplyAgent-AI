@@ -585,6 +585,8 @@ def render_cv(
     use_llm_polish: bool = False,
     pinned_project_titles: list[str] | None = None,
     pinned_rank: bool = True,
+    max_certifications: int = 8,
+    max_publications: int = 4,
 ) -> RenderResult:
     """Render a tailored CV. See module docstring for the pipeline.
 
@@ -759,14 +761,24 @@ def render_cv(
         jd_terms,
         lambda c: list(c.tags or []) + [c.name, c.issuer],
     )
-    certifications = [cert_lookup.get((c.name or "").lower(), c) for c in certs_ranked]
+    # Signal curation — the planner may cap certs (senior JDs: intro
+    # courses read as noise) and publications (non-research JDs: a wall
+    # of "under submission" hurts). Ranked best-first, so the cap keeps
+    # the most JD-relevant entries.
+    certifications = [
+        cert_lookup.get((c.name or "").lower(), c)
+        for c in certs_ranked[:max_certifications]
+    ]
 
     pubs_ranked = _rank_entries(
         list(original_library.publications),
         jd_terms,
         lambda p: list(p.tags or []) + [p.title, p.venue],
     )
-    publications = [pub_lookup.get((p.title or "").lower(), p) for p in pubs_ranked]
+    publications = [
+        pub_lookup.get((p.title or "").lower(), p)
+        for p in pubs_ranked[:max_publications]
+    ]
 
     # ---- Skills groups: tailor per JD.
     # First try LLM-driven tailoring (reorders + filters items per JD).

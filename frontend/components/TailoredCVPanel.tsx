@@ -9,6 +9,7 @@ import {
   fetchCVLibrary,
   fetchCVTemplate,
   fetchLLMStatus,
+  generateCoverLetter,
   putCVLibrary,
   renderCV,
   renderProgressUrl,
@@ -948,6 +949,11 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
         />
       )}
 
+      {/* Cover letter — text only, generated on demand after a render. */}
+      {result && jobText.trim() && (
+        <CoverLetterCard jobText={jobText} onError={onError} />
+      )}
+
       {/* Tracker actions — only after a successful render with a JD.
           Master-CV renders (no JD) have nothing to track. */}
       {result && jobText.trim() && !trackedForThisRender && (
@@ -1262,6 +1268,24 @@ function ResultPanel({
                 .join(" → ")}`}
             </span>
           )}
+          {typeof result.ats_score === "number" && result.ats_score >= 0 && (
+            <span
+              className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                result.ats_score >= 90
+                  ? "bg-emerald-100 text-emerald-800"
+                  : result.ats_score >= 70
+                  ? "bg-amber-100 text-amber-800"
+                  : "bg-rose-100 text-rose-700"
+              }`}
+              title={
+                (result.ats_issues || []).length
+                  ? (result.ats_issues || []).join("\n")
+                  : "The PDF re-extracts cleanly — contact line, section headers, and glyphs all survive ATS parsing."
+              }
+            >
+              {`ATS: ${result.ats_score}/100`}
+            </span>
+          )}
         </p>
         <div className="flex gap-2">
           <button
@@ -1388,4 +1412,97 @@ function download(filename: string, data: string, mime: string) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+/** On-demand plain-text cover letter for the JD in the box above.
+ *  Text only (no file) — copy straight into an application form. */
+function CoverLetterCard({
+  jobText,
+  onError,
+}: {
+  jobText: string;
+  onError: (m: string) => void;
+}) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [length, setLength] = useState<"short" | "standard" | "long">("standard");
+  const [notes, setNotes] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  async function generate() {
+    setBusy(true);
+    setCopied(false);
+    try {
+      const t = await generateCoverLetter({
+        job_text: jobText.trim(),
+        length,
+        extra_notes: notes.trim(),
+      });
+      setText(t);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Cover letter generation failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard unavailable — user can select manually */
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm font-semibold text-slate-800">Cover letter</p>
+        <select
+          value={length}
+          onChange={(e) => setLength(e.target.value as "short" | "standard" | "long")}
+          className="rounded border-slate-300 bg-white px-1.5 py-0.5 text-xs"
+          title="Target length"
+        >
+          <option value="short">Short (~160 words)</option>
+          <option value="standard">Standard (~250 words)</option>
+          <option value="long">Long (~380 words)</option>
+        </select>
+        <button
+          type="button"
+          onClick={generate}
+          disabled={busy}
+          className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+        >
+          {busy ? "Writing…" : text ? "Regenerate" : "Generate cover letter"}
+        </button>
+        {text && (
+          <button
+            type="button"
+            onClick={copy}
+            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            {copied ? "Copied ✓" : "Copy"}
+          </button>
+        )}
+      </div>
+      <input
+        type="text"
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        placeholder="Optional notes to weave in (e.g. referred by X, available from June)…"
+        className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
+      />
+      {text && (
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={12}
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm leading-relaxed"
+        />
+      )}
+    </div>
+  );
 }

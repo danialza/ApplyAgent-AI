@@ -84,7 +84,11 @@ def apply_action(row, kind: str, payload: dict) -> None:
         value = payload.get("value", "")
         lst = list(getattr(row, section, None) or [])
         if 0 <= idx < len(lst):
-            target = dict(lst[idx]) if not isinstance(lst[idx], dict) else lst[idx]
+            # ALWAYS copy the entry dict. Mutating the dict in place
+            # shares it between the ORM's loaded value and the new list,
+            # so SQLAlchemy's equality check sees no change and emits no
+            # UPDATE — the edit silently vanishes on commit.
+            target = dict(lst[idx])
             target[field] = value
             lst[idx] = target
             setattr(row, section, lst)
@@ -92,7 +96,7 @@ def apply_action(row, kind: str, payload: dict) -> None:
         idx = payload["index"]
         edu = list(getattr(row, "education", None) or [])
         if 0 <= idx < len(edu):
-            entry = dict(edu[idx]) if not isinstance(edu[idx], dict) else edu[idx]
+            entry = dict(edu[idx])  # copy — see set_field note above
             entry["institution"] = (payload.get("new_institution") or "").strip()
             entry["degree"] = (payload.get("new_degree") or "").strip()
             edu[idx] = entry
@@ -104,7 +108,7 @@ def apply_action(row, kind: str, payload: dict) -> None:
         max_chars = int(payload.get("max_chars", 180))
         lst = list(getattr(row, section, None) or [])
         if 0 <= idx < len(lst):
-            target = dict(lst[idx]) if not isinstance(lst[idx], dict) else lst[idx]
+            target = dict(lst[idx])  # copy — see set_field note above
             cur = (target.get(field) or "")[:max_chars]
             target[field] = cur
             lst[idx] = target
