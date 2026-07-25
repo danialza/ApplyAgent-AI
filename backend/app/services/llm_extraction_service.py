@@ -475,7 +475,7 @@ def _chat_completion_anthropic(
         supports_prefill = not any(
             tag in model_id for tag in (
                 "sonnet-4-6", "sonnet-4-7", "sonnet-4-8", "sonnet-5",
-                "opus-4-6", "opus-4-7", "opus-4-8",
+                "opus-4-6", "opus-4-7", "opus-4-8", "opus-5",
                 "haiku-4-6", "haiku-4-7",
             )
         )

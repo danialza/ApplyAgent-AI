@@ -437,6 +437,7 @@ def set_llm_model(payload: dict) -> dict:
 # allowed via the API for unreleased / private models.
 _KNOWN_MODELS = {
     "anthropic": [
+        "claude-opus-5",          # latest flagship Opus
         "claude-sonnet-5",        # latest flagship Sonnet
         "claude-sonnet-4-6",
         "claude-sonnet-4-5",
