@@ -804,6 +804,47 @@ def render_cv(
                 return _entry_score(g.items, jd_groups)
             skills_groups_sorted = sorted(skills_groups_sorted, key=lambda g: -_gs(g))
 
+    # ---- Backstop: never lose a JD-named skill the candidate really has.
+    # The LLM skill-tailor drops "off-topic" groups, and polish rewrites
+    # can quietly shed a tool name. If the JD asks for something the
+    # ORIGINAL library genuinely lists, dropping it is pure self-harm —
+    # it reads as a missing requirement. Re-inject anything that fell
+    # out. This can only restore terms the candidate already claimed;
+    # it can never invent one.
+    if job and jd_groups and skills_groups_sorted:
+        kept_keys: set[str] = set()
+        for g in skills_groups_sorted:
+            for it in (g.items or []):
+                k = group_key(it)
+                if k:
+                    kept_keys.add(k)
+        recovered: list[str] = []
+        seen_recovered: set[str] = set()
+        for g in library.skills_groups:
+            for it in (g.items or []):
+                k = group_key(it)
+                if not k or k in kept_keys or k in seen_recovered:
+                    continue
+                if k in jd_groups:          # the JD explicitly asks for it
+                    seen_recovered.add(k)
+                    recovered.append(it)
+        if recovered:
+            import logging as _log
+            _log.getLogger("ai_job_cv_matcher.renderer").info(
+                "Skill backstop restored %d JD-named skill(s): %s",
+                len(recovered), ", ".join(recovered[:8]),
+            )
+            from app.models.schemas import SkillGroup
+            target = next(
+                (g for g in skills_groups_sorted
+                 if "additional" in (g.label or "").lower()), None)
+            if target is not None:
+                target.items = list(target.items or []) + recovered
+            else:
+                skills_groups_sorted = list(skills_groups_sorted) + [
+                    SkillGroup(label="Additional Tools", items=recovered)
+                ]
+
     # ---- Bold + escape all bullet text in one pass.
     def render_bullet(text: str) -> str:
         # FINAL SAFETY NET — strip any LLM meta-commentary ("...the JD
