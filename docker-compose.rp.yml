@@ -1,0 +1,85 @@
+# AI Job-CV Matching Agent — REJECTION-PROOF variant.
+#
+# An isolated third stack for testing the batch autopilot (section 7)
+# WITHOUT touching the stacks you use day-to-day (3000/8000 API-key,
+# 3100/8100 subscription). It shares the same database volume, so JDs it
+# tailors land in the SAME Applications tracker.
+#
+#     make rp-up      # build + start on 3300 / 8300
+#     make rp-down
+#
+# Frontend → http://localhost:3300
+# Backend  → http://localhost:8300   (Swagger at /docs)
+#
+# LLM: uses the ANTHROPIC_API_KEY from .env (batch = many renders, so
+# the billed API is more reliable than the subscription session limit).
+
+name: applyagent-rp
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: ai-job-cv-matcher-backend-rp
+    container_name: ai-job-cv-backend-rp
+    restart: unless-stopped
+    ports:
+      - "${RP_BACKEND_PORT:-8300}:8000"
+    environment:
+      APP_DB_URL: sqlite:////data/app.db
+      APP_INDEX_DIR: /data/index
+      APP_CORS_ORIGINS: ${RP_CORS_ORIGINS:-http://localhost:3300}
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
+
+      USE_LLM_EXTRACTION: ${USE_LLM_EXTRACTION:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-120}
+      LATEX_COMPILE_TIMEOUT_SECONDS: ${LATEX_COMPILE_TIMEOUT_SECONDS:-180}
+      XDG_CACHE_HOME: /data/tectonic_cache
+      APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+    volumes:
+      # ISOLATED database. This is a validation stack: the metrics
+      # harvester WRITES to the master CV, so it must never touch the
+      # live 3000/8000 database. Seeded from a copy of the live DB by
+      # `make rp-seed` so the data is realistic.
+      - backend_data_rp:/data
+      - hf_cache_rp:/data/hf_cache
+      - ./docs:/app/docs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${RP_NEXT_PUBLIC_API_URL:-http://localhost:8300}
+    image: ai-job-cv-matcher-frontend-rp
+    container_name: ai-job-cv-frontend-rp
+    restart: unless-stopped
+    ports:
+      - "${RP_FRONTEND_PORT:-3300}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  backend_data_rp:   # isolated copy — never the live DB
+  hf_cache_rp:

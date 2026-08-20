@@ -594,6 +594,11 @@ class RenderCVResponse(BaseModel):
     # e.g. PDF compilation skipped) + human-readable issues found.
     ats_score: int = -1
     ats_issues: list[str] = Field(default_factory=list)
+    # Post-render recruiter scorecard: evidence-graded JD coverage
+    # (required vs preferred), bullet lint, hard-gate checks, seniority
+    # calibration, an overall 0-100 fit score + go/no-go verdict, and a
+    # simulated 7-second recruiter scan. Empty when the render had no JD.
+    scorecard: dict = Field(default_factory=dict)
     # What the section planner actually chose, so the UI can show
     # "Auto picked 3 / 2 / 3 — mid-level JD, fits two pages".
     section_plan: dict = Field(default_factory=dict)

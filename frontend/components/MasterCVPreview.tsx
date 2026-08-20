@@ -7,6 +7,7 @@ import {
   applyMetricAnswers,
   fetchCVLibrary,
   fetchLibraryIssues,
+  fetchMetricDensity,
   fetchMetricQuestions,
   ignoreIssue,
   putCVLibrary,
@@ -766,6 +767,11 @@ function MetricsHarvestCard({ onApplied }: { onApplied: () => void }) {
   const [questions, setQuestions] = useState<MetricQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [applying, setApplying] = useState(false);
+  const [density, setDensity] = useState<import("@/lib/api").MetricDensity | null>(null);
+
+  useEffect(() => {
+    fetchMetricDensity().then(setDensity).catch(() => {});
+  }, []);
   const [err, setErr] = useState<string | null>(null);
 
   async function load() {
@@ -806,15 +812,36 @@ function MetricsHarvestCard({ onApplied }: { onApplied: () => void }) {
   }
 
   if (!open) {
+    const below = density && density.below_gate;
     return (
-      <div className="rounded-lg border border-dashed border-emerald-300 bg-emerald-50 p-2 text-xs">
+      <div
+        className={`rounded-lg border p-2 text-xs ${
+          below
+            ? "border-amber-400 bg-amber-50"
+            : "border-dashed border-emerald-300 bg-emerald-50"
+        }`}
+      >
         <button
           type="button"
           onClick={load}
-          className="font-semibold text-emerald-700 hover:text-emerald-900"
+          className={`font-semibold ${
+            below ? "text-amber-800 hover:text-amber-900" : "text-emerald-700 hover:text-emerald-900"
+          }`}
         >
-          📈 Strengthen with numbers (recruiters rank quantified impact first)
+          📈 Strengthen with numbers
+          {density && (
+            <span className="ml-1 font-normal">
+              — {Math.round(density.metric_density * 100)}% of bullets carry a real number
+              {below && ` (target ${Math.round(density.target * 100)}%)`}
+            </span>
+          )}
         </button>
+        {below && (
+          <p className="mt-1 text-amber-800">
+            Recruiters rank quantified impact first. This is the highest-leverage
+            fix available before you tailor anything.
+          </p>
+        )}
       </div>
     );
   }

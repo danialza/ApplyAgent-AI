@@ -170,6 +170,37 @@ batch-logs: ## Tail the batch stack logs.
 batch-clean: ## Stop the batch stack + remove ONLY its own caches (never the shared DB).
 	$(COMPOSE_UNSET) $(BATCH_COMPOSE) down -v
 
+# ---- Rejection-proof stack (validation, ports 3300 / 8300) ----
+# Isolated validation stack for the recruiter-scorecard work. Has its
+# OWN database (seeded from a copy of the live one) because the metrics
+# harvester writes to the master CV — the 3000/3100/3200 stacks are
+# never touched.
+
+RP_COMPOSE := docker compose -f docker-compose.rp.yml $(COMPOSE_ENV_FILES)
+
+.PHONY: rp-seed
+rp-seed: ## Copy the live DB into the rejection-proof stack's own volume.
+	@bash scripts/rp-seed.sh
+
+.PHONY: rp-up
+rp-up: ## Build + start the rejection-proof stack (3300 / 8300).
+	$(COMPOSE_UNSET) $(RP_COMPOSE) up --build -d
+	@echo ""
+	@echo "RP Backend  → http://localhost:8300  (docs at /docs)"
+	@echo "RP Frontend → http://localhost:3300"
+
+.PHONY: rp-down
+rp-down: ## Stop the rejection-proof stack.
+	$(COMPOSE_UNSET) $(RP_COMPOSE) down
+
+.PHONY: rp-logs
+rp-logs: ## Tail the rejection-proof stack logs.
+	$(COMPOSE_UNSET) $(RP_COMPOSE) logs -f --tail=100
+
+.PHONY: rp-clean
+rp-clean: ## Stop it and delete ONLY its isolated volumes.
+	$(COMPOSE_UNSET) $(RP_COMPOSE) down -v
+
 # ---- Help ----
 
 .PHONY: help

@@ -323,6 +323,19 @@ export async function fetchMetricQuestions(): Promise<MetricQuestion[]> {
   return data.questions || [];
 }
 
+export interface MetricDensity {
+  total: number;
+  metric_density: number;
+  with_metric: number;
+  target: number;
+  below_gate: boolean;
+}
+
+export async function fetchMetricDensity(): Promise<MetricDensity> {
+  const res = await fetch(`${API_BASE}/api/cv/metrics/density`, { cache: "no-store" });
+  return handle<MetricDensity>(res);
+}
+
 export async function applyMetricAnswers(
   answers: (MetricQuestion & { answer: string })[]
 ): Promise<{ applied: { key: string; rewritten: string }[] }> {

@@ -333,6 +333,26 @@ def metrics_questions(db: Session = Depends(get_db)) -> dict:
     return {"questions": generate_questions(db)}
 
 
+@router.get("/metrics/density")
+def metrics_density(db: Session = Depends(get_db)) -> dict:
+    """Deterministic quantification health of the MASTER CV.
+
+    Drives the pre-render gate: recruiters rank quantified impact first,
+    so a master sitting below `target` is the highest-leverage thing to
+    fix before tailoring anything.
+    """
+    from app.services.cv_scorecard import bullet_audit
+
+    row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is None:
+        return {"total": 0, "metric_density": 0.0, "below_gate": False}
+    audit = bullet_audit(_to_out(row))
+    target = 0.40
+    audit["target"] = target
+    audit["below_gate"] = audit.get("metric_density", 0.0) < target
+    return audit
+
+
 @router.post("/metrics/apply")
 def metrics_apply(payload: dict, db: Session = Depends(get_db)) -> dict:
     """Apply answered metric questions to the master library.
@@ -1096,6 +1116,21 @@ def render_tailored_cv(
             header=library_out.header.model_dump() if library_out.header else {},
         )
 
+    # ---- Recruiter scorecard: evidence-graded coverage, bullet lint,
+    # hard gates, seniority calibration, fit verdict + 7-second scan.
+    # Only meaningful with a JD; never fails the render.
+    scorecard: dict = {}
+    if job is not None:
+        _emit("scorecard", "Grading the CV like a recruiter")
+        from app.services.cv_scorecard import build_scorecard
+        scorecard = build_scorecard(
+            library=library_out,
+            job=job,
+            latex=result.latex,
+            ats_score=ats_score,
+            use_llm=bool(payload.use_llm),
+        )
+
     _emit("done", "Done", used_llm=used_llm, coverage=round(coverage, 2))
 
     return RenderCVResponse(
@@ -1113,6 +1148,7 @@ def render_tailored_cv(
         suggested_filename=filename or "tailored-cv",
         ats_score=ats_score,
         ats_issues=ats_issues,
+        scorecard=scorecard,
         section_plan={
             "max_selected_projects": plan.max_selected_projects,
             "max_additional_projects": plan.max_additional_projects,

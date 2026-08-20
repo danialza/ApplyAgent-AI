@@ -463,6 +463,8 @@ export interface RenderCVResponse {
   /** ATS parseability of the compiled PDF, 0-100. -1 = not checked. */
   ats_score?: number;
   ats_issues?: string[];
+  /** Post-render recruiter scorecard (empty when the render had no JD). */
+  scorecard?: Scorecard;
   section_plan?: SectionPlanOut;
   job_title?: string;
   job_company?: string;
@@ -482,4 +484,52 @@ export interface AgentRunResponse {
   tailored: TailorResponse[];
   used_profile_fallback: boolean;
   error: string;
+}
+
+
+// ---------- Recruiter scorecard ----------
+
+export interface SkillEvidence {
+  skill: string;
+  /** evidenced = proven in a bullet · mentioned = skills-line only · missing */
+  state: "evidenced" | "mentioned" | "missing";
+}
+
+export interface Scorecard {
+  fit_score: number;
+  verdict: "strong" | "worth-applying" | "weak" | "no-go" | "";
+  coverage?: {
+    required: SkillEvidence[];
+    preferred: SkillEvidence[];
+    required_evidenced: number;
+    required_any: number;
+    preferred_evidenced: number;
+    preferred_any: number;
+    required_missing: string[];
+    required_unevidenced: string[];
+  };
+  bullets?: {
+    total: number;
+    metric_density: number;
+    with_metric: number;
+    strong_verb_ratio: number;
+    weak_opener_count: number;
+    hedge_count: number;
+    weak_openers: { section: string; title: string; bullet: string }[];
+    hedges: { section: string; title: string; phrase: string; bullet: string }[];
+  };
+  hard_gates?: { kind: string; requirement: string; status: string; detail: string }[];
+  seniority?: {
+    jd_level?: string;
+    cv_reads_as?: string;
+    aligned?: boolean;
+    note?: string;
+  };
+  recruiter_scan?: {
+    verdict: string;
+    reason: string;
+    first_impression_role: string;
+    fixes: string[];
+  } | null;
+  error?: string;
 }

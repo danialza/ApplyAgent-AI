@@ -15,6 +15,7 @@ import {
   renderProgressUrl,
   uploadMarkdownCV,
 } from "@/lib/api";
+import ScorecardPanel from "@/components/ScorecardPanel";
 import type {
   CVLibrary,
   DuplicateCheck,
@@ -948,6 +949,10 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
           onDownloadPdf={downloadPdf}
         />
       )}
+
+      {/* Recruiter scorecard — evidence-graded coverage, hard gates,
+          bullet health, and the 7-second scan verdict. */}
+      {result?.scorecard && <ScorecardPanel card={result.scorecard} />}
 
       {/* Cover letter — text only, generated on demand after a render. */}
       {result && jobText.trim() && (
