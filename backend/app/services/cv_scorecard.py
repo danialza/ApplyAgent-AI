@@ -94,11 +94,25 @@ def _iter_bullets(library) -> list[tuple[str, str, str]]:
 
 
 def _strip_latex(text: str) -> str:
-    t = re.sub(r"\\textbf\{([^}]*)\}", r"\1", text or "")
+    """Rendered LaTeX → the plain text a human/ATS actually reads.
+
+    Cuts the preamble first: without that, \\usepackage and \\newcommand
+    bodies survive as noise and the 7-second recruiter scan grades
+    layout code instead of the CV.
+    """
+    t = text or ""
+    i = t.find(r"\begin{document}")
+    if i >= 0:
+        t = t[i + len(r"\begin{document}"):]
+    t = re.sub(r"(?<!\\)%.*", " ", t)                                  # comments
+    t = re.sub(r"\\textbf\{([^}]*)\}", r"\1", t)
     t = re.sub(r"\\href\{[^}]*\}\{([^}]*)\}", r"\1", t)
-    t = re.sub(r"\\[a-zA-Z]+\*?", " ", t)
+    t = re.sub(r"\\(?:section|subsection)\*?\{([^}]*)\}", r"\1. ", t)
+    t = re.sub(r"\\(?:begin|end)\{[^}]*\}", " ", t)
+    t = re.sub(r"\\item\b", " ", t)
+    t = re.sub(r"\\[a-zA-Z]+\*?(?:\[[^\]]*\])?", " ", t)
     t = t.replace("{", " ").replace("}", " ").replace("\\", " ")
-    return re.sub(r"\s+", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
 
 
 def _first_word(bullet: str) -> str:
@@ -144,12 +158,36 @@ def _evidence_index(library) -> dict[str, str]:
     return idx
 
 
-def coverage_breakdown(library, job) -> dict[str, Any]:
+def _rendered_group_keys(latex: str) -> set[str]:
+    """Group keys actually present in the rendered document text."""
+    body = _strip_latex(latex).lower()
+    keys: set[str] = set()
+    words = re.findall(r"[a-z0-9\+\#\.\-]+", body)
+    for w in words:
+        k = group_key(w)
+        if k:
+            keys.add(k)
+    for n in (2, 3):
+        for i in range(len(words) - n + 1):
+            k = group_key(" ".join(words[i:i + n]))
+            if k:
+                keys.add(k)
+    return keys
+
+
+def coverage_breakdown(library, job, latex: str = "") -> dict[str, Any]:
     """Split JD skills into required/preferred and grade each as
-    evidenced / mentioned / missing."""
+    evidenced / mentioned / missing.
+
+    `latex` gates the result: a term is only credited when it survived
+    into the RENDERED document. Without that gate a skill the coverage
+    booster wove into a bullet that the page-fit loop later trimmed
+    would score as evidenced while being absent from the PDF.
+    """
     if job is None:
         return {}
     idx = _evidence_index(library)
+    rendered = _rendered_group_keys(latex) if latex else None
 
     def grade(skills: list[str]) -> list[dict[str, str]]:
         rows: list[dict[str, str]] = []
@@ -160,7 +198,10 @@ def coverage_breakdown(library, job) -> dict[str, Any]:
             if not k or k in seen:
                 continue
             seen.add(k)
-            rows.append({"skill": disp, "state": idx.get(k, "missing")})
+            state = idx.get(k, "missing")
+            if rendered is not None and k not in rendered:
+                state = "missing"   # never made it onto the page
+            rows.append({"skill": disp, "state": state})
         return rows
 
     required = grade(list(job.required_skills or []))
@@ -240,11 +281,38 @@ def hard_gates(job, library, latex: str) -> list[dict[str, str]]:
     gates: list[dict[str, str]] = []
     body = _strip_latex(latex).lower()
 
+    # "PhD preferred" / "nice to have" is not a gate — flagging it as one
+    # turns every ambitious application into a false no-go.
+    soft = re.compile(
+        r"\b(preferred|nice[- ]to[- ]have|bonus|a plus|desirable|ideally|"
+        r"advantageous|would be great)\b", re.I)
+
     quals = list(job.qualifications or []) + list(job.education_requirements or [])
+    seen_q: set[str] = set()
     for q in quals:
         ql = (q or "").strip()
-        if not ql:
+        if not ql or soft.search(ql):
             continue
+        norm = re.sub(r"\W+", " ", ql.lower()).strip()
+        if norm in seen_q:
+            continue
+        seen_q.add(norm)
+        # The JD extractor often strips the qualifier, turning
+        # "PhD in ML preferred" into "PhD in Machine Learning". Look the
+        # phrase back up in the raw posting and honour a soft marker
+        # sitting next to it — otherwise every stretch role reads no-go.
+        raw = (getattr(job, "raw_text", "") or "")
+        if raw:
+            head = re.escape(ql.split(",")[0][:40])
+            m = re.search(head, raw, re.I)
+            if m:
+                # Only the REST OF THIS SENTENCE counts — a wider window
+                # bleeds into the next requirement and would suppress a
+                # genuine gate because the following line says "preferred".
+                tail = raw[m.end(): m.end() + 90]
+                tail = re.split(r"[.;\n\r•]", tail)[0]
+                if soft.search(tail):
+                    continue
         m = _YEARS_RE.search(ql)
         if m:
             need = int(m.group(1))
@@ -420,7 +488,7 @@ def build_scorecard(
 ) -> dict[str, Any]:
     """Full scorecard. Never raises."""
     try:
-        cov = coverage_breakdown(library, job)
+        cov = coverage_breakdown(library, job, latex)
         bullets = bullet_audit(library)
         gates = hard_gates(job, library, latex)
         seniority = seniority_check(job, library)

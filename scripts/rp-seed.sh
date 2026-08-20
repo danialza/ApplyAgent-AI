@@ -15,6 +15,9 @@ docker run --rm -v "$SRC_VOL":/src:ro -v "$DST_VOL":/dst alpine:3.20 sh -c '
   cp /src/app.db /dst/app.db
   [ -f /src/app.db-wal ] && cp /src/app.db-wal /dst/app.db-wal || true
   [ -f /src/app.db-shm ] && cp /src/app.db-shm /dst/app.db-shm || true
-  echo "✓ seeded $(wc -c < /dst/app.db) bytes"
+  # The backend runs as uid 1000; a root-owned /data breaks the
+  # tectonic cache dir with Permission denied and every PDF compile fails.
+  chown -R 1000:1000 /dst
+  echo "✓ seeded $(wc -c < /dst/app.db) bytes, /data owned by uid 1000"
 '
 echo "Done — restart the stack: make rp-up"
