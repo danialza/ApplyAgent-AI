@@ -382,7 +382,10 @@ export interface EvidenceDraft {
   needs_number: boolean;
 }
 
-export async function preflightRender(jobText: string): Promise<{
+export async function preflightRender(
+  jobText: string,
+  pinnedTitles: string[] = []
+): Promise<{
   drafts: EvidenceDraft[];
   gaps: string[];
   job_title: string;
@@ -391,7 +394,7 @@ export async function preflightRender(jobText: string): Promise<{
   const res = await fetch(`${API_BASE}/api/cv/render/preflight`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ job_text: jobText }),
+    body: JSON.stringify({ job_text: jobText, pinned_project_titles: pinnedTitles }),
   });
   return handle(res);
 }

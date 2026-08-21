@@ -347,7 +347,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
     if (jdt) {
       setPreflighting(true);
       try {
-        const pf = await preflightRender(jdt);
+        const pf = await preflightRender(jdt, pinnedTitles);
         if (pf.drafts.length > 0) {
           // Show the drafts AND start building straight away. The panel
           // stays visible for the whole render so anything wrong can be

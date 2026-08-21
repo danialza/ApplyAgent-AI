@@ -398,9 +398,14 @@ def evidence_questions(payload: dict, db: Session = Depends(get_db)) -> dict:
 def render_preflight(payload: dict, db: Session = Depends(get_db)) -> dict:
     """Look at a JD BEFORE rendering and draft the missing evidence.
 
-    Body: {"job_text": str}. Parses the JD, works out which required /
-    preferred skills the master CV does not evidence, and returns a
-    draft bullet for each — project, usage, and a figure.
+    Body: {"job_text": str, "pinned_project_titles": [str]}. Parses the
+    JD, works out which required / preferred skills the master CV does
+    not evidence, and returns a draft bullet for each: project, usage
+    and a figure.
+
+    When projects are pinned, drafts only attach to those (plus work
+    experience, which always renders) — otherwise a bullet lands on a
+    project the CV won't include and evidences nothing.
 
     Nothing is rendered and nothing is written. The approved drafts come
     back on POST /render as `evidence_bullets`, which apply to that one
@@ -430,7 +435,10 @@ def render_preflight(payload: dict, db: Session = Depends(get_db)) -> dict:
     ordered = [g for g in gaps if not (g.lower() in seen or seen.add(g.lower()))]
 
     return {
-        "drafts": propose(db, ordered[:8]) if ordered else [],
+        "drafts": (
+            propose(db, ordered[:8], list((payload or {}).get("pinned_project_titles") or []))
+            if ordered else []
+        ),
         "gaps": ordered,
         "job_title": job.job_title or "",
         "job_company": job.company or "",

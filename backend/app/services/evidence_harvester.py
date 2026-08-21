@@ -47,12 +47,22 @@ class _Proposal(BaseModel):
     bullet: str
 
 
-def _entry_catalogue(row) -> list[dict]:
-    """Every entry the harvester may attach a bullet to."""
+def _entry_catalogue(row, allowed_titles: list[str] | None = None) -> list[dict]:
+    """Entries the harvester may attach a bullet to.
+
+    `allowed_titles` restricts the PROJECT sections to the ones the user
+    pinned for this CV. Without it the harvester happily attaches a
+    bullet to a project that will not be rendered, so the skill stays
+    unevidenced and the draft is wasted. Experience always renders, so
+    it is never filtered out.
+    """
+    allow = {t.strip().lower() for t in (allowed_titles or []) if t and t.strip()}
     out: list[dict] = []
     for section in ("selected_projects", "additional_projects", "experience"):
         for i, e in enumerate(getattr(row, section, None) or []):
             title = e.get("title") if isinstance(e, dict) else getattr(e, "title", "")
+            if allow and section != "experience" and (title or "").strip().lower() not in allow:
+                continue
             hl = e.get("highlights") if isinstance(e, dict) else getattr(e, "highlights", [])
             out.append({
                 "section": section,
@@ -224,14 +234,26 @@ class _Draft(BaseModel):
 
 # A draft is never saved while it still carries a blank the candidate
 # has not filled in. Deterministic — not a matter of the model behaving.
-_PLACEHOLDER = re.compile(r"(_{2,}|\[[^\]]*\]|<[^>]*>|\bTODO\b|\bN/?A\b|\bXX+\b|\?\?+)", re.I)
+_PLACEHOLDER = re.compile(
+    r"("
+    r"_{2,}|\[[^\]]*\]|<[^>]*>|\bTODO\b|\bN/?A\b|\bXX+\b|\?\?+"
+    # Hedges the model reaches for when it has no basis. These read as
+    # an unfinished draft and must never reach a CV.
+    r"|\bto be confirmed\b|\bTBC\b|\bTBD\b"
+    r"|\b(?:details?|scope|usage|specifics?|exact\s+\w+)\s+(?:to be|pending)\b"
+    r"|\bconfirm(?:ed)?\s+by\s+(?:the\s+)?candidate\b"
+    r"|\bif applicable\b|\bplease specify\b|\byour \w+ here\b"
+    r")",
+    re.I,
+)
 
 
 def has_placeholder(text: str) -> bool:
     return bool(_PLACEHOLDER.search(text or ""))
 
 
-def propose(db: Session, skills: list[str]) -> list[dict]:
+def propose(db: Session, skills: list[str],
+            allowed_titles: list[str] | None = None) -> list[dict]:
     """For each unevidenced skill, draft a bullet for the candidate to
     approve: which project it belongs to, how it was probably used, and
     a metric.
@@ -254,7 +276,9 @@ def propose(db: Session, skills: list[str]) -> list[dict]:
     if not wanted:
         return []
 
-    entries = _entry_catalogue(row)
+    entries = _entry_catalogue(row, allowed_titles)
+    if not entries:
+        return []
     # Full bullet text so the model can ground usage AND reuse real numbers.
     detail = []
     for e in entries:
@@ -288,6 +312,11 @@ def propose(db: Session, skills: list[str]) -> list[dict]:
         "NEVER state a figure as fact unless it came from the entry's own "
         "bullets. The placeholder is the honest answer when you do not "
         "know.\n"
+        "If a skill has NO plausible connection to any listed entry, OMIT "
+        "it from the output entirely. Do not pad the bullet with hedges "
+        "like 'usage and scope to be confirmed by candidate', 'details "
+        "TBC' or 'if applicable' - a CV bullet that admits it is "
+        "unfinished is worse than no bullet at all.\n"
         'Reply JSON only: {"drafts": [{"skill": str, "section": str, '
         '"index": int, "usage": str, "metric": {"text": str, "source": '
         'str}, "bullet": str}]}'
@@ -314,6 +343,12 @@ def propose(db: Session, skills: list[str]) -> list[dict]:
             continue
         bullet = (d.bullet or "").strip()
         if not bullet:
+            continue
+        # A hedged bullet is an admission the model had nothing to go on.
+        # Better to show one fewer draft than a line that reads as a
+        # half-finished note.
+        if has_placeholder(bullet):
+            logger.info("evidence: dropped hedged draft for %s", d.skill)
             continue
         # A "from_master" claim only counts if the figure really is in
         # that entry — otherwise downgrade it so the UI asks for it.
