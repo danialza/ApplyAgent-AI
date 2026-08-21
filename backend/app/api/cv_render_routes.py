@@ -422,10 +422,13 @@ def evidence_approve(payload: dict, db: Session = Depends(get_db)) -> dict:
             section=str(d.get("section", "")),
             index=int(d.get("index", -1)),
             bullet=str(d.get("bullet", "")),
+            metric_source=str(d.get("metric_source", "from_master")),
+            confirmed=bool(d.get("confirmed", False)),
         ))
     return {
         "written": [r for r in results if r.get("status") == "written"],
         "needs_number": [r for r in results if r.get("status") == "needs_number"],
+        "needs_confirmation": [r for r in results if r.get("status") == "needs_confirmation"],
         "skipped": [r for r in results if r.get("status") == "skipped"],
     }
 

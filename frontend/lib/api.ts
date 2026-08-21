@@ -371,8 +371,10 @@ export interface EvidenceDraft {
   entry_title: string;
   usage: string;
   metric_text: string;
-  metric_source: string;
+  metric_source: string;   // "from_master" | "estimate"
+  metric_basis: string;    // how an estimate was arrived at
   bullet: string;
+  needs_confirmation: boolean;
   needs_number: boolean;
 }
 
@@ -387,10 +389,14 @@ export async function proposeEvidence(skills: string[]): Promise<EvidenceDraft[]
 }
 
 export async function approveEvidence(
-  drafts: { skill: string; key: string; section: string; index: number; bullet: string }[]
+  drafts: {
+    skill: string; key: string; section: string; index: number;
+    bullet: string; metric_source: string; confirmed: boolean;
+  }[]
 ): Promise<{
   written: { skill: string; entry: string; bullet: string }[];
   needs_number: { skill: string; reason: string }[];
+  needs_confirmation: { skill: string; reason: string }[];
   skipped: { skill: string; reason: string }[];
 }> {
   const res = await fetch(`${API_BASE}/api/cv/evidence/approve`, {

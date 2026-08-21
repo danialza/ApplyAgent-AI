@@ -203,9 +203,14 @@ def apply_answer(db: Session, *, skill: str, key: str, question: str, answer: st
 
 class _Metric(BaseModel):
     text: str = ""
-    # from_master      -> this number already appears in the CV; safe to reuse
-    # needs_your_number-> a placeholder showing WHAT to measure; user must fill
-    source: str = "needs_your_number"
+    # from_master -> the figure already appears in that entry; true by
+    #                construction, nothing to confirm.
+    # estimate    -> a conservative figure inferred from how the project
+    #                is described. NOT a fact until the candidate says so,
+    #                which is why `basis` explains where it came from and
+    #                the save path demands an explicit confirmation.
+    source: str = "estimate"
+    basis: str = ""
 
 
 class _Draft(BaseModel):
@@ -268,11 +273,15 @@ def propose(db: Session, skills: list[str]) -> list[dict]:
         "  usage — a short, concrete guess at how they used the tool ON "
         "THAT project, consistent with what the project already does.\n"
         "  metric — a number for the bullet. If a suitable figure ALREADY "
-        'appears in that entry\'s bullets, reuse it verbatim and set '
-        'source to "from_master". Otherwise DO NOT invent one: set '
-        'source to "needs_your_number" and put a placeholder showing '
-        'what to measure, e.g. "~___ enquiries/month" or "cut handling '
-        'time ___%".\n'
+        'appears in that entry\'s bullets, reuse it verbatim, set source '
+        'to "from_master" and leave basis empty. Otherwise propose a '
+        'CONSERVATIVE, defensible estimate the candidate can sanity-check '
+        '(round it, prefer the low end, e.g. "~200 enquiries/month" not '
+        '"2,347"), set source to "estimate", and in basis explain in one '
+        "short sentence how you got there so they can correct it, e.g. "
+        '"assumes the pipeline covered the daily support inbox". An '
+        "estimate is a starting point for the candidate to confirm or "
+        "change — never state it as though you know it.\n"
         "  bullet — the full draft, opening with a strong past-tense verb, "
         "naming the tool explicitly, under 220 characters, no first-person "
         "pronouns, embedding the metric text exactly as given.\n"
@@ -316,7 +325,9 @@ def propose(db: Session, skills: list[str]) -> list[dict]:
         if source == "from_master" and metric_text:
             nums = re.findall(r"\d[\d,\.]*", metric_text)
             if nums and not all(n in src_bullets for n in nums):
-                source = "needs_your_number"
+                # Claimed to be from the CV but isn't — demote to an
+                # estimate so it has to be confirmed like any other.
+                source = "estimate"
         out.append({
             "skill": d.skill,
             "key": facts.normalise_key(f"evidence_{d.skill}"),
@@ -326,18 +337,25 @@ def propose(db: Session, skills: list[str]) -> list[dict]:
             "usage": (d.usage or "").strip(),
             "metric_text": metric_text,
             "metric_source": source,
+            "metric_basis": (d.metric.basis or "").strip(),
             "bullet": bullet,
-            "needs_number": source != "from_master" or has_placeholder(bullet),
+            "needs_confirmation": source != "from_master",
+            "needs_number": has_placeholder(bullet),
         })
     return out
 
 
 def apply_bullet(db: Session, *, skill: str, key: str, section: str,
-                 index: int, bullet: str, question: str = "") -> dict:
+                 index: int, bullet: str, question: str = "",
+                 metric_source: str = "from_master",
+                 confirmed: bool = False) -> dict:
     """Save a bullet the candidate reviewed and approved.
 
-    Refuses anything still carrying a placeholder — an unfilled blank
-    means they have not supplied the real number yet.
+    A bullet whose figure was an ESTIMATE is refused unless the
+    candidate explicitly confirmed it. Ticking a row is agreement that
+    the work happened; confirming the figure is a separate, deliberate
+    act, because that number is what an interviewer will ask about.
+    Anything still carrying an unfilled blank is refused outright.
     """
     from app.models.db_models import CVLibrary
     from app.services import candidate_facts as facts
@@ -350,6 +368,9 @@ def apply_bullet(db: Session, *, skill: str, key: str, section: str,
     if has_placeholder(bullet):
         return {"status": "needs_number", "skill": skill,
                 "reason": "still contains a blank — fill in the real figure first"}
+    if metric_source == "estimate" and not confirmed:
+        return {"status": "needs_confirmation", "skill": skill,
+                "reason": "the figure is an estimate — confirm or correct it before saving"}
     if skill.split()[0].lower() not in bullet.lower():
         return {"status": "skipped", "skill": skill,
                 "reason": "bullet does not name the skill"}

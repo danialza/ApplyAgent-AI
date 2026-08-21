@@ -226,6 +226,7 @@ function EvidenceGap({
   const [drafts, setDrafts] = useState<EvidenceDraft[]>([]);
   const [text, setText] = useState<Record<string, string>>({});
   const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [confirmed, setConfirmed] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [saved, setSaved] = useState<{ skill: string; entry: string; bullet: string }[]>([]);
@@ -240,7 +241,8 @@ function EvidenceGap({
       const got = await proposeEvidence(all);
       setDrafts(got);
       setText(Object.fromEntries(got.map((d) => [d.key, d.bullet])));
-      setPicked(Object.fromEntries(got.map((d) => [d.key, !d.needs_number])));
+      setPicked(Object.fromEntries(got.map((d) => [d.key, true])));
+      setConfirmed({});
       if (got.length === 0) setNote("Nothing to propose — these are already handled.");
     } catch (e) {
       setNote(e instanceof Error ? e.message : "Could not draft suggestions.");
@@ -252,7 +254,15 @@ function EvidenceGap({
   async function save() {
     const chosen = drafts
       .filter((d) => picked[d.key])
-      .map((d) => ({ skill: d.skill, key: d.key, section: d.section, index: d.index, bullet: (text[d.key] || "").trim() }));
+      .map((d) => ({
+        skill: d.skill,
+        key: d.key,
+        section: d.section,
+        index: d.index,
+        bullet: (text[d.key] || "").trim(),
+        metric_source: d.metric_source,
+        confirmed: d.metric_source === "from_master" || !!confirmed[d.key],
+      }));
     if (chosen.length === 0) {
       setNote("Tick at least one draft to add.");
       return;
@@ -264,6 +274,10 @@ function EvidenceGap({
       setSaved(res.written);
       const bits: string[] = [];
       if (res.written.length) bits.push(`${res.written.length} added to your master CV`);
+      if (res.needs_confirmation.length)
+        bits.push(
+          `${res.needs_confirmation.length} waiting on you to confirm the figure`
+        );
       if (res.needs_number.length)
         bits.push(`${res.needs_number.length} still has a blank — replace the ___ with your real figure`);
       if (res.skipped.length) bits.push(`${res.skipped.length} skipped`);
@@ -309,10 +323,11 @@ function EvidenceGap({
         <button type="button" onClick={() => setOpen(false)} className="text-slate-500 hover:text-slate-800">✕</button>
       </div>
       <p className="text-amber-800">
-        Each draft picks the project it most likely belongs to and how the tool was used.
-        Where a real number already exists in that project it is reused; otherwise you get
-        a <b>___</b> blank — fill it with your real figure. A draft still holding a blank
-        will not save. Untick anything you have not actually done.
+        Each draft picks the project it most likely belongs to, how the tool was used, and
+        a figure. Where a real number already exists in that project it is reused as-is.
+        Otherwise you get a <b>suggested estimate</b> with the reasoning behind it — check
+        it, correct it in the text if it is off, and tick to confirm. Estimates will not
+        save unconfirmed. Untick anything you have not actually done.
       </p>
       {busy && drafts.length === 0 && <p className="text-slate-500">Drafting…</p>}
 
@@ -329,15 +344,39 @@ function EvidenceGap({
             <span className="text-slate-500">→ {d.entry_title}</span>
             {d.metric_source === "from_master" ? (
               <span className="ml-auto rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800">
-                number reused from this project
+                figure already in this project
               </span>
             ) : (
-              <span className="ml-auto rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-                needs your number
+              <span className="ml-auto rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800">
+                suggested estimate — confirm it
               </span>
             )}
           </label>
           {d.usage && <p className="mt-1 text-slate-500">Suggested usage: {d.usage}</p>}
+          {d.metric_source !== "from_master" && (
+            <div className="mt-1 rounded bg-sky-50 px-2 py-1">
+              <p className="text-sky-900">
+                Suggested figure: <b>{d.metric_text || "—"}</b>
+                {d.metric_basis && (
+                  <span className="text-sky-700"> — {d.metric_basis}</span>
+                )}
+              </p>
+              <label className="mt-1 flex items-start gap-1.5 text-sky-900">
+                <input
+                  type="checkbox"
+                  checked={!!confirmed[d.key]}
+                  onChange={(e) =>
+                    setConfirmed((c) => ({ ...c, [d.key]: e.target.checked }))
+                  }
+                  className="mt-0.5 rounded border-sky-400 text-sky-600 focus:ring-sky-500"
+                />
+                <span>
+                  This figure is about right — or I have corrected it in the text below.
+                  <b> Required</b>, since an interviewer will ask about this number.
+                </span>
+              </label>
+            </div>
+          )}
           <textarea
             value={text[d.key] ?? d.bullet}
             onChange={(e) => setText((t) => ({ ...t, [d.key]: e.target.value }))}
