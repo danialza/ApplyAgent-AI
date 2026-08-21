@@ -158,6 +158,96 @@ def _evidence_index(library) -> dict[str, str]:
     return idx
 
 
+# ---------- loose skill matching ----------
+
+# Exact adjacent phrases were the only thing that counted, which threw
+# away most real matches: a bullet reading "Developed and documented
+# REST APIs" does not contain the string "API Development", so the CV
+# scored red for API Development while evidencing it plainly. A
+# recruiter reads the bullet and ticks the box; the grader should too.
+# Loose matching asks a weaker, still honest question: does one bullet
+# contain every content word of the skill, allowing for the ordinary
+# endings English puts on them?
+
+_SKILL_STOP = {
+    "and", "or", "the", "of", "for", "a", "an", "with", "using", "in",
+    "to", "on", "at", "by", "based", "via",
+}
+
+
+def _stem(word: str) -> str:
+    """Crude suffix strip, enough to join a word to its relatives.
+
+    The point is that "Developed and documented REST APIs" and "API
+    Development" reach the same roots. Verb and noun forms of one idea
+    must land together: integration/integrated -> integr,
+    automation/automated -> autom, documentation/documented ->
+    document, APIs -> api, modelling -> model. Deliberately blunt, with
+    length guards so a short root is never chopped into a false match.
+    """
+    w = (word or "").lower()
+
+    # Plurals first, since they sit outside the verb/noun endings.
+    if w.endswith("es") and len(w) > 4 and w[:-2].endswith(("s", "x", "z", "ch", "sh")):
+        w = w[:-2]
+    elif w.endswith("s") and not w.endswith("ss") and len(w) - 1 >= 3:
+        w = w[:-1]
+
+    for suf in ("ions", "ion", "ments", "ment", "ings", "ing",
+                "ers", "er", "ed"):
+        if w.endswith(suf) and len(w) - len(suf) >= 4:
+            w = w[: -len(suf)]
+            break
+
+    # "integrat"/"automat"/"documentat" -> integr/autom/document, so the
+    # -ion noun and the -ed verb converge on one root.
+    if w.endswith("at") and len(w) >= 6:
+        w = w[:-2]
+    # "modell" -> "model"
+    if len(w) > 4 and w[-1] == w[-2] and w[-1] not in "aeiou":
+        w = w[:-1]
+    return w
+
+
+def _stems(text: str) -> set[str]:
+    return {
+        _stem(t)
+        for t in re.findall(r"[A-Za-z][A-Za-z0-9\+\#\.\-]*", text or "")
+        if t.lower() not in _SKILL_STOP
+    }
+
+
+def _skill_stems(skill: str) -> set[str]:
+    """Content-word stems a chunk must all carry to count as the skill."""
+    return {
+        _stem(t)
+        for t in re.findall(r"[A-Za-z][A-Za-z0-9\+\#\.\-]*", skill or "")
+        if t.lower() not in _SKILL_STOP
+    } - {""}
+
+
+def _chunks(text: str) -> list[set[str]]:
+    """Stem sets, one per sentence/bullet, so a skill only counts when
+    its words meet in ONE claim rather than scattered across the CV."""
+    parts = re.split(r"(?<=[.!?])\s+|\n+|\u2022", text or "")
+    return [_stems(p) for p in parts if p and p.strip()]
+
+
+def skill_in_text(text: str, skill: str) -> bool:
+    """True when `text` evidences `skill` strictly or loosely."""
+    key = group_key(canonical(skill) or skill)
+    if key and key in _rendered_group_keys(text or ""):
+        return True
+    want = _skill_stems(skill)
+    if not want:
+        return False
+    return any(want <= chunk for chunk in _chunks(text or ""))
+
+
+def _loose_hit(want: set[str], chunks: list[set[str]]) -> bool:
+    return bool(want) and any(want <= c for c in chunks)
+
+
 def _rendered_group_keys(latex: str) -> set[str]:
     """Group keys actually present in the rendered document text."""
     body = _strip_latex(latex).lower()
@@ -189,6 +279,17 @@ def coverage_breakdown(library, job, latex: str = "") -> dict[str, Any]:
     idx = _evidence_index(library)
     rendered = _rendered_group_keys(latex) if latex else None
 
+    # Loose evidence, one chunk per bullet / per skills line, so a skill
+    # counts when all its words meet inside a single claim.
+    bullet_chunks = [_stems(b) for _s, _t, b in _iter_bullets(library)]
+    bullet_chunks += [_stems(t) for _s, t, _b in _iter_bullets(library)]
+    claim_chunks: list[set[str]] = []
+    if getattr(library, "summary", ""):
+        claim_chunks += _chunks(library.summary)
+    for g in (getattr(library, "skills_groups", None) or []):
+        claim_chunks += [_stems(i) for i in (getattr(g, "items", None) or [])]
+    rendered_chunks = _chunks(_strip_latex(latex)) if latex else None
+
     def grade(skills: list[str]) -> list[dict[str, str]]:
         rows: list[dict[str, str]] = []
         seen: set[str] = set()
@@ -198,9 +299,18 @@ def coverage_breakdown(library, job, latex: str = "") -> dict[str, Any]:
             if not k or k in seen:
                 continue
             seen.add(k)
+            want = _skill_stems(disp)
             state = idx.get(k, "missing")
+            # Exact-phrase matching alone misses most honest evidence:
+            # "Developed and documented REST APIs" evidences API
+            # Development to any reader, but carries neither phrase.
+            if state != "evidenced" and _loose_hit(want, bullet_chunks):
+                state = "evidenced"
+            elif state == "missing" and _loose_hit(want, claim_chunks):
+                state = "mentioned"
             if rendered is not None and k not in rendered:
-                state = "missing"   # never made it onto the page
+                if not (rendered_chunks and _loose_hit(want, rendered_chunks)):
+                    state = "missing"   # never made it onto the page
             rows.append({"skill": disp, "state": state})
         return rows
 

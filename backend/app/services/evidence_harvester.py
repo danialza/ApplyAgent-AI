@@ -409,18 +409,17 @@ def propose(db: Session, skills: list[str],
 def _names_skill(bullet: str, skill: str) -> bool:
     """True when `bullet` carries `skill` the way the scorecard reads it.
 
-    Uses the scorecard's own group-key matcher rather than a substring
-    test, so a synonym counts ("PostgreSQL" evidences "Relational
-    Databases") while a bullet that merely describes the activity in
-    other words does not.
+    Uses the scorecard's own matcher, so whatever the scorecard would
+    credit is what the draft is allowed to say: a synonym counts
+    ("PostgreSQL" evidences "Relational Databases"), and so does natural
+    phrasing that carries the skill's words without the exact label
+    ("Developed and documented REST APIs" for "API Development").
     """
-    from app.services.cv_scorecard import _rendered_group_keys
-    from app.services.synonyms import canonical, group_key
+    from app.services.cv_scorecard import skill_in_text
 
-    key = group_key(canonical(skill) or skill)
-    if not key:
+    if not (skill or "").strip():
         return True  # nothing to check against; don't block the draft
-    return key in _rendered_group_keys(bullet or "")
+    return skill_in_text(bullet or "", skill)
 
 
 def _repair_unnamed(llm, drafts: list["_Draft"]) -> list["_Draft"]:
