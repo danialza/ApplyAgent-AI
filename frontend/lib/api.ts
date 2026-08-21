@@ -240,11 +240,15 @@ export async function putCVLibrary(payload: Omit<CVLibrary, "id" | "updated_at">
   return handle<CVLibrary>(res);
 }
 
-export async function renderCV(body: RenderCVRequest): Promise<RenderCVResponse> {
+export async function renderCV(
+  body: RenderCVRequest,
+  signal?: AbortSignal
+): Promise<RenderCVResponse> {
   const res = await fetch(`${API_BASE}/api/cv/render`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   return handle<RenderCVResponse>(res);
 }

@@ -71,6 +71,12 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
   const [evPicked, setEvPicked] = useState<Record<string, boolean>>({});
   const [evConfirmed, setEvConfirmed] = useState<Record<string, boolean>>({});
   const [preflighting, setPreflighting] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  // True once the user has changed any drafted line or unticked a row.
+  const edited =
+    !!evidenceDrafts &&
+    (evidenceDrafts.some((d) => (evText[d.key] ?? d.bullet) !== d.bullet) ||
+      evidenceDrafts.some((d) => !evPicked[d.key]));
   // Coverage auto-boost target. Renderer loops the LLM up to 3 times
   // weaving missing JD keywords into existing bullets until coverage
   // hits this fraction (or the loop stalls).
@@ -343,13 +349,22 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
       try {
         const pf = await preflightRender(jdt);
         if (pf.drafts.length > 0) {
+          // Show the drafts AND start building straight away. The panel
+          // stays visible for the whole render so anything wrong can be
+          // cancelled; there is no extra click to get a CV.
           setEvidenceDrafts(pf.drafts);
           setEvText(Object.fromEntries(pf.drafts.map((d) => [d.key, d.bullet])));
           setEvPicked(Object.fromEntries(pf.drafts.map((d) => [d.key, true])));
           setEvConfirmed({});
           setPreflighting(false);
-          setBusy(false);
-          return;   // wait for the user to approve, then doRender()
+          await doRender(
+            pf.drafts.map((d) => ({
+              section: d.section,
+              index: d.index,
+              bullet: d.bullet,
+            }))
+          );
+          return;
         }
       } catch {
         // Pre-flight is advisory — fall through and render as normal.
@@ -360,9 +375,20 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
     await doRender([]);
   }
 
+
+  function cancelRender() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    stopProgress();
+    setBusy(false);
+    setEvidenceDrafts(null);
+  }
+
   async function doRender(
     evidence: { section: string; index: number; bullet: string }[]
   ) {
+    const ac = new AbortController();
+    abortRef.current = ac;
     setBusy(true);
     setResult(null);
     setTrackedForThisRender(false);
@@ -413,7 +439,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
         pinned_rank: pinnedRank,
         progress_id: pid,
         evidence_bullets: evidence,
-      });
+      }, ac.signal);
       setResult(data);
       if (data.compile_error && !data.compiled) {
         // Surface as a soft warning — LaTeX still came through.
@@ -424,8 +450,12 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
         onError(`LLM polish skipped: ${data.llm_skip_reason}`);
       }
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Render failed.");
+      // A cancel is a deliberate user action, not an error.
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        onError(err instanceof Error ? err.message : "Render failed.");
+      }
     } finally {
+      abortRef.current = null;
       stopProgress();
       setBusy(false);
     }
@@ -996,13 +1026,13 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
       {evidenceDrafts && evidenceDrafts.length > 0 && (
         <div className="space-y-2 rounded-lg border border-sky-300 bg-sky-50 p-3 text-xs">
           <p className="text-sm font-semibold text-sky-900">
-            This JD asks for {evidenceDrafts.length} thing{evidenceDrafts.length > 1 ? "s" : ""} your CV
-            doesn&apos;t evidence — add them to this CV?
+            Adding {evidenceDrafts.length} thing{evidenceDrafts.length > 1 ? "s" : ""} this JD asks for that your CV
+            doesn&apos;t evidence{busy ? " — building now…" : ""}
           </p>
           <p className="text-sky-800">
-            These go into <b>this one PDF only</b>. Nothing is saved to your master CV, so
-            tailoring never silts it up. Untick anything you haven&apos;t actually done, and
-            correct any figure that&apos;s off.
+            These go into <b>this one PDF only</b>; nothing is saved to your master CV.
+            The build has already started, so if something here is wrong just hit
+            <b> Cancel</b>. Edit any line and a rebuild button appears.
           </p>
 
           {evidenceDrafts.map((d) => (
@@ -1026,7 +1056,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
                   </span>
                 )}
               </label>
-              {d.metric_source !== "from_master" && (
+              {d.needs_confirmation && (
                 <div className="mt-1 rounded bg-sky-50 px-2 py-1">
                   <p className="text-sky-900">
                     Suggested figure: <b>{d.metric_text || "—"}</b>
@@ -1053,43 +1083,48 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
           ))}
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                const approved = evidenceDrafts
-                  .filter(
-                    (d) =>
-                      evPicked[d.key] &&
-                      (d.metric_source === "from_master" || evConfirmed[d.key])
-                  )
-                  .map((d) => ({
-                    section: d.section,
-                    index: d.index,
-                    bullet: (evText[d.key] || "").trim(),
-                  }));
-                setEvidenceDrafts(null);
-                doRender(approved);
-              }}
-              className="rounded bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-800"
-            >
-              Build the CV with these
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setEvidenceDrafts(null);
-                doRender([]);
-              }}
-              className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Skip — build without them
-            </button>
-            <span className="text-[11px] text-sky-800">
-              {evidenceDrafts.filter(
-                (d) => evPicked[d.key] && (d.metric_source === "from_master" || evConfirmed[d.key])
-              ).length}{" "}
-              of {evidenceDrafts.length} ready
-            </span>
+            {busy ? (
+              <button
+                type="button"
+                onClick={cancelRender}
+                className="rounded bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700"
+              >
+                Cancel
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEvidenceDrafts(null)}
+                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Close
+              </button>
+            )}
+            {edited && (
+              <button
+                type="button"
+                onClick={() => {
+                  const approved = evidenceDrafts
+                    .filter((d) => evPicked[d.key])
+                    .map((d) => ({
+                      section: d.section,
+                      index: d.index,
+                      bullet: (evText[d.key] || "").trim(),
+                    }));
+                  doRender(approved);
+                }}
+                disabled={busy}
+                className="rounded bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-800 disabled:opacity-60"
+              >
+                Rebuild with my edits
+              </button>
+            )}
+            {evidenceDrafts.some((d) => d.needs_confirmation) && (
+              <span className="text-[11px] text-amber-800">
+                ⚠ {evidenceDrafts.filter((d) => d.needs_confirmation).length} figure(s) are
+                estimates — check them before you send this CV.
+              </span>
+            )}
           </div>
         </div>
       )}

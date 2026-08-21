@@ -339,10 +339,74 @@ def propose(db: Session, skills: list[str]) -> list[dict]:
             "metric_source": source,
             "metric_basis": (d.metric.basis or "").strip(),
             "bullet": bullet,
-            "needs_confirmation": source != "from_master",
+            # Confirmation is about a NUMERIC CLAIM, not about the source
+            # label. A draft that states no figure at all has nothing to
+            # verify, so asking the candidate to confirm "N/A" is just
+            # noise. Only demand it when the bullet actually carries a
+            # number that isn't traceable to the entry it attaches to.
+            "needs_confirmation": _unverified_number(bullet, src_bullets),
             "needs_number": has_placeholder(bullet),
         })
     return out
+
+
+def _unverified_number(bullet: str, source_text: str) -> bool:
+    """True when the bullet states a figure the source entry doesn't back.
+
+    One consistent rule instead of a version-number heuristic: a number
+    is trusted when the SAME word-plus-number phrase already appears in
+    the source ("Swift 6" is in the project text, so it is not a new
+    claim), or when a distinctive magnitude (>= 10, or carrying %/k/M)
+    appears there. "Orchestrated 6+ concurrent agents" is a new claim
+    even though the source says "Swift 6", because the phrase differs.
+    """
+    src = (source_text or "").lower()
+    src_flat = src.replace(",", "")
+    text = bullet or ""
+
+    for m in re.finditer(
+        r"(?:([A-Za-z]+)\s+)?(\d[\d,\.]*)\s*(%|k\b|K\b|M\b|\+)?\s*([A-Za-z]+)?",
+        text,
+    ):
+        prev, raw, unit, nxt = (
+            (m.group(1) or "").lower(), m.group(2),
+            (m.group(3) or ""), (m.group(4) or "").lower(),
+        )
+        bare = raw.replace(",", "").rstrip(".")
+        if not bare:
+            continue
+        try:
+            value = float(bare)
+        except ValueError:
+            continue
+
+        # A product version ("Swift 6", "ROS 2") is not an impact claim.
+        # Signature: a capitalised word that is NOT the sentence opener,
+        # a small bare integer, and no %/k/M/+ unit. That excludes
+        # "Orchestrated 6+ agents" and "Processed 2,300 enquiries",
+        # whose leading word is just the sentence's verb.
+        if (
+            prev
+            and not unit
+            and value < 10
+            and m.start(1) is not None
+            and m.start(1) > 0
+            and text[m.start(1)].isupper()
+        ):
+            continue
+
+        # Same phrasing already in the source -> nothing new is claimed.
+        if prev and re.search(rf"\b{re.escape(prev)}\s+{re.escape(bare)}\b", src_flat):
+            continue
+        if nxt and re.search(rf"\b{re.escape(bare)}\+?\s+{re.escape(nxt)}", src_flat):
+            continue
+
+        # A distinctive magnitude is trusted if it appears at all.
+        if unit in {"%", "k", "K", "M"} or value >= 10:
+            if bare in src_flat:
+                continue
+        return True
+    return False
 
 
 def apply_bullet(db: Session, *, skill: str, key: str, section: str,
