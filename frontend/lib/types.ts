@@ -426,7 +426,7 @@ export interface RenderCVRequest {
    *  (GET /api/cv/render/progress/{id}). */
   progress_id?: string;
   /** Evidence bullets approved for THIS render only — never persisted. */
-  evidence_bullets?: { section: string; index: number; bullet: string }[];
+  evidence_bullets?: { section: string; index: number; bullet: string; title?: string }[];
 }
 
 export interface SectionPlanOut {

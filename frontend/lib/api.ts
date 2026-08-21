@@ -384,7 +384,13 @@ export interface EvidenceDraft {
 
 export async function preflightRender(
   jobText: string,
-  pinnedTitles: string[] = []
+  pinnedTitles: string[] = [],
+  caps: {
+    max_selected_projects?: number;
+    max_additional_projects?: number;
+    max_experience?: number;
+    pinned_rank?: boolean;
+  } = {}
 ): Promise<{
   drafts: EvidenceDraft[];
   gaps: string[];
@@ -394,7 +400,11 @@ export async function preflightRender(
   const res = await fetch(`${API_BASE}/api/cv/render/preflight`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ job_text: jobText, pinned_project_titles: pinnedTitles }),
+    body: JSON.stringify({
+      job_text: jobText,
+      pinned_project_titles: pinnedTitles,
+      ...caps,
+    }),
   });
   return handle(res);
 }

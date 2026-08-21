@@ -50,18 +50,18 @@ class _Proposal(BaseModel):
 def _entry_catalogue(row, allowed_titles: list[str] | None = None) -> list[dict]:
     """Entries the harvester may attach a bullet to.
 
-    `allowed_titles` restricts the PROJECT sections to the ones the user
-    pinned for this CV. Without it the harvester happily attaches a
-    bullet to a project that will not be rendered, so the skill stays
-    unevidenced and the draft is wasted. Experience always renders, so
-    it is never filtered out.
+    `allowed_titles` is the set of entries that will appear on the page,
+    as reported by a dry run of the renderer. Every section is filtered
+    against it, experience included: a bullet on an entry the CV omits
+    evidences nothing, so the skill stays red on the scorecard and the
+    draft is wasted. Passing nothing keeps the whole library in play.
     """
     allow = {t.strip().lower() for t in (allowed_titles or []) if t and t.strip()}
     out: list[dict] = []
     for section in ("selected_projects", "additional_projects", "experience"):
         for i, e in enumerate(getattr(row, section, None) or []):
             title = e.get("title") if isinstance(e, dict) else getattr(e, "title", "")
-            if allow and section != "experience" and (title or "").strip().lower() not in allow:
+            if allow and (title or "").strip().lower() not in allow:
                 continue
             hl = e.get("highlights") if isinstance(e, dict) else getattr(e, "highlights", [])
             out.append({
@@ -307,8 +307,12 @@ def propose(db: Session, skills: list[str],
         "estimate is a starting point for the candidate to confirm or "
         "change — never state it as though you know it.\n"
         "  bullet — the full draft, opening with a strong past-tense verb, "
-        "naming the tool explicitly, under 220 characters, no first-person "
-        "pronouns, embedding the metric text exactly as given.\n"
+        "under 220 characters, no first-person pronouns, embedding the "
+        "metric text exactly as given. It MUST contain the skill's own "
+        "wording (or its standard name, e.g. 'PostgreSQL' for 'Relational "
+        "Databases'). A bullet about training a model that never says "
+        "'model training' does not evidence model training: a recruiter "
+        "scanning for the term will not find it.\n"
         "NEVER state a figure as fact unless it came from the entry's own "
         "bullets. The placeholder is the honest answer when you do not "
         "know.\n"
@@ -337,6 +341,18 @@ def propose(db: Session, skills: list[str],
         return []
 
     valid = {(e["section"], e["index"]): e["title"] for e in entries}
+
+    # The scorecard credits a skill only when its term survives into the
+    # rendered text, so a draft that never names the skill buys nothing:
+    # it lands in the PDF and the skill stays red. Grade each draft with
+    # the scorecard's own matcher and give the model one chance to
+    # rewrite the ones that miss.
+    missed = [d for d in drafts if not _names_skill(d.bullet or "", d.skill)]
+    if missed:
+        repaired = _repair_unnamed(llm, missed)
+        by_skill = {r.skill.lower(): r for r in repaired}
+        drafts = [by_skill.get((d.skill or "").lower(), d) for d in drafts]
+
     out: list[dict] = []
     for d in drafts:
         if (d.section, d.index) not in valid:
@@ -349,6 +365,11 @@ def propose(db: Session, skills: list[str],
         # half-finished note.
         if has_placeholder(bullet):
             logger.info("evidence: dropped hedged draft for %s", d.skill)
+            continue
+        if not _names_skill(bullet, d.skill):
+            logger.info(
+                "evidence: dropped draft for %s (bullet never names the skill)", d.skill,
+            )
             continue
         # A "from_master" claim only counts if the figure really is in
         # that entry — otherwise downgrade it so the UI asks for it.
@@ -382,6 +403,68 @@ def propose(db: Session, skills: list[str],
             "needs_confirmation": _unverified_number(bullet, src_bullets),
             "needs_number": has_placeholder(bullet),
         })
+    return out
+
+
+def _names_skill(bullet: str, skill: str) -> bool:
+    """True when `bullet` carries `skill` the way the scorecard reads it.
+
+    Uses the scorecard's own group-key matcher rather than a substring
+    test, so a synonym counts ("PostgreSQL" evidences "Relational
+    Databases") while a bullet that merely describes the activity in
+    other words does not.
+    """
+    from app.services.cv_scorecard import _rendered_group_keys
+    from app.services.synonyms import canonical, group_key
+
+    key = group_key(canonical(skill) or skill)
+    if not key:
+        return True  # nothing to check against; don't block the draft
+    return key in _rendered_group_keys(bullet or "")
+
+
+def _repair_unnamed(llm, drafts: list["_Draft"]) -> list["_Draft"]:
+    """Ask once for rewrites of bullets that never name their skill.
+
+    Wording only: the entry, the metric and the claim stay put, so a
+    repair cannot smuggle in a new assertion. Anything that comes back
+    still unnamed is dropped by the caller.
+    """
+    system = (
+        "Each bullet below is missing the skill's name, so a recruiter "
+        "scanning for that term will not find it. Rewrite ONLY the "
+        "wording so the skill's standard name appears naturally in the "
+        "sentence. Keep the same project, the same claim and the same "
+        "figure - change nothing but the phrasing. Never add a new fact "
+        "and never hedge.\n"
+        "The result must read as English a person would write. Do NOT "
+        "wedge the label in as a noun: 'Designed an AI Solution Design "
+        "architecture' is wrong; 'Designed the AI solution design for a "
+        "RAG assistant' is right. If the term genuinely cannot be worked "
+        "in without mangling the sentence, return the bullet unchanged.\n"
+        'Reply JSON only: {"drafts": [{"skill": str, "bullet": str}]}'
+    )
+    payload = json.dumps(
+        {"bullets": [{"skill": d.skill, "bullet": d.bullet} for d in drafts]},
+        ensure_ascii=False,
+    )
+    try:
+        raw = llm._chat_completion(  # type: ignore[attr-defined]
+            [{"role": "system", "content": system},
+             {"role": "user", "content": payload + "\n\nReturn valid JSON only."}],
+            json_mode=True,
+        )
+        data = llm._coerce_json(raw) or {}  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("evidence repair pass failed: %s", exc)
+        return drafts
+
+    fixed = {str(r.get("skill", "")).lower(): str(r.get("bullet", "")).strip()
+             for r in (data.get("drafts") or []) if isinstance(r, dict)}
+    out: list[_Draft] = []
+    for d in drafts:
+        nb = fixed.get((d.skill or "").lower(), "")
+        out.append(d.model_copy(update={"bullet": nb}) if nb else d)
     return out
 
 

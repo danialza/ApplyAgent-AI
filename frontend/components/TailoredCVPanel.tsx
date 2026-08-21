@@ -70,6 +70,10 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
   const [evText, setEvText] = useState<Record<string, string>>({});
   const [evPicked, setEvPicked] = useState<Record<string, boolean>>({});
   const [evConfirmed, setEvConfirmed] = useState<Record<string, boolean>>({});
+  // JD skills the harvester could not ground in any entry that renders.
+  // Shown rather than silently dropped: the honest answer is that
+  // nothing in the CV backs them, not that the gap went away.
+  const [evUndrafted, setEvUndrafted] = useState<string[]>([]);
   const [preflighting, setPreflighting] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   // True once the user has changed any drafted line or unticked a row.
@@ -347,12 +351,21 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
     if (jdt) {
       setPreflighting(true);
       try {
-        const pf = await preflightRender(jdt, pinnedTitles);
+        const pf = await preflightRender(jdt, pinnedTitles, {
+          max_selected_projects: maxSelected,
+          max_additional_projects: maxAdditional,
+          max_experience: maxExperience,
+          pinned_rank: pinnedRank,
+        });
         if (pf.drafts.length > 0) {
           // Show the drafts AND start building straight away. The panel
           // stays visible for the whole render so anything wrong can be
           // cancelled; there is no extra click to get a CV.
           setEvidenceDrafts(pf.drafts);
+          {
+            const drafted = new Set(pf.drafts.map((d) => d.skill.toLowerCase()));
+            setEvUndrafted((pf.gaps || []).filter((g) => !drafted.has(g.toLowerCase())));
+          }
           setEvText(Object.fromEntries(pf.drafts.map((d) => [d.key, d.bullet])));
           setEvPicked(Object.fromEntries(pf.drafts.map((d) => [d.key, true])));
           setEvConfirmed({});
@@ -362,6 +375,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
               section: d.section,
               index: d.index,
               bullet: d.bullet,
+              title: d.entry_title,
             }))
           );
           return;
@@ -385,7 +399,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
   }
 
   async function doRender(
-    evidence: { section: string; index: number; bullet: string }[]
+    evidence: { section: string; index: number; bullet: string; title?: string }[]
   ) {
     const ac = new AbortController();
     abortRef.current = ac;
@@ -1110,6 +1124,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
                       section: d.section,
                       index: d.index,
                       bullet: (evText[d.key] || "").trim(),
+                      title: d.entry_title,
                     }));
                   doRender(approved);
                 }}
@@ -1126,6 +1141,14 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
               </span>
             )}
           </div>
+          {evUndrafted.length > 0 && (
+            <p className="mt-3 border-t border-sky-200 pt-2 text-[11px] text-slate-600">
+              No draft for <strong>{evUndrafted.join(", ")}</strong> — nothing in
+              the projects this CV shows uses them, so nothing was invented.
+              They stay amber on the scorecard until a project that really used
+              them is in your master CV.
+            </p>
+          )}
         </div>
       )}
 

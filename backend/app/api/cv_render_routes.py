@@ -425,21 +425,49 @@ def render_preflight(payload: dict, db: Session = Depends(get_db)) -> dict:
     job = JobParsed(**parsed.to_dict())
     library_out = _to_out(row)
 
-    # Grade against the library itself (no rendered LaTeX yet), so a
-    # skill only counts as evidenced when a real bullet carries it.
-    cov = coverage_breakdown(library_out, job)
+    def _int(name: str, default: int) -> int:
+        try:
+            return int((payload or {}).get(name, default))
+        except (TypeError, ValueError):
+            return default
+
+    pinned = [str(t) for t in ((payload or {}).get("pinned_project_titles") or []) if str(t).strip()]
+
+    # Dry-run the real renderer (rule-based, no PDF) to learn which
+    # entries this JD will actually put on the page. Grading the whole
+    # library instead was the bug the scorecard kept exposing: a skill
+    # buried in a project that never renders scored as evidenced, so no
+    # draft was offered, and the scorecard then marked it missing. Same
+    # renderer, same caps, same pins => the gaps here are the reds there.
+    dry = render_cv(
+        library_out,
+        job=job,
+        max_selected_projects=_int("max_selected_projects", 3),
+        max_additional_projects=_int("max_additional_projects", 0),
+        max_experience=_int("max_experience", 2),
+        compile_pdf=False,
+        use_llm_polish=False,
+        pinned_project_titles=pinned,
+        pinned_rank=bool((payload or {}).get("pinned_rank", True)),
+    )
+    will_render = [
+        t for t in list(dry.sections_chosen.get("projects") or [])
+        + list(dry.sections_chosen.get("experience") or []) if t
+    ]
+
+    # Grade the rendered document, gated by its LaTeX, exactly as the
+    # post-render scorecard does.
+    cov = coverage_breakdown(library_out, job, dry.latex)
     gaps = list(cov.get("required_unevidenced", [])) + list(cov.get("required_missing", []))
     # Preferred-stack items that are entirely absent are worth offering too.
-    gaps += [r["skill"] for r in cov.get("preferred", []) if r["state"] == "missing"]
+    gaps += [r["skill"] for r in cov.get("preferred", []) if r["state"] in ("missing", "mentioned")]
     seen: set[str] = set()
     ordered = [g for g in gaps if not (g.lower() in seen or seen.add(g.lower()))]
 
     return {
-        "drafts": (
-            propose(db, ordered[:8], list((payload or {}).get("pinned_project_titles") or []))
-            if ordered else []
-        ),
+        "drafts": propose(db, ordered, will_render) if ordered else [],
         "gaps": ordered,
+        "will_render": will_render,
         "job_title": job.job_title or "",
         "job_company": job.company or "",
     }
@@ -968,30 +996,69 @@ def render_tailored_cv(
     # Applied to the in-memory library only. Nothing is written back, so
     # repeated tailoring can never silt up the master CV with per-JD
     # phrasing. Same guards as the persistent path.
-    _ev = [e for e in (getattr(payload, "evidence_bullets", None) or [])]
-    if _ev:
+    _ev_clean: list[tuple[str, int, str, str]] = []
+    for e in (getattr(payload, "evidence_bullets", None) or []):
         from app.services.evidence_harvester import has_placeholder
         from app.services.text_guard import clean_bullet, has_meta
-        applied = 0
-        for e in _ev:
-            section = str(e.get("section", ""))
-            try:
-                idx = int(e.get("index", -1))
-            except (TypeError, ValueError):
+        section = str(e.get("section", ""))
+        try:
+            idx = int(e.get("index", -1))
+        except (TypeError, ValueError):
+            continue
+        bullet = clean_bullet("", str(e.get("bullet", "")).strip())
+        if not bullet or len(bullet) < 25 or has_meta(bullet) or has_placeholder(bullet):
+            continue
+        _ev_clean.append((section, idx, bullet, str(e.get("title", "")).strip()))
+
+    def _with_ev(lib):
+        """Return `lib` with the approved evidence bullets appended.
+
+        Applied at EVERY render_cv call rather than once up front. The
+        polish and coverage-boost stages both hand back a rebuilt
+        library, and an LLM that rewrites an entry is free to drop a
+        bullet it did not author -- which is exactly what happened:
+        approved evidence went in, and none of it reached the PDF. Re-
+        applying at the last moment makes that impossible.
+
+        Entries are located by title when the caller supplies one, since
+        polish can reorder a section and leave the index pointing at the
+        wrong entry. Appending is idempotent, so repeated passes over an
+        already-evidenced library are harmless.
+        """
+        if not _ev_clean:
+            return lib
+        out = lib.model_copy(deep=True)
+        for section, idx, bullet, title in _ev_clean:
+            target = getattr(out, section, None)
+            if target is None:
                 continue
-            bullet = clean_bullet("", str(e.get("bullet", "")).strip())
-            if not bullet or len(bullet) < 25 or has_meta(bullet) or has_placeholder(bullet):
+            entry = None
+            if title:
+                for cand in target:
+                    if (getattr(cand, "title", "") or "").strip().lower() == title.lower():
+                        entry = cand
+                        break
+            if entry is None and 0 <= idx < len(target):
+                entry = target[idx]
+            if entry is None:
                 continue
-            target = getattr(library_out, section, None)
-            if target is None or not (0 <= idx < len(target)):
+            hl = list(entry.highlights or [])
+            if any(bullet.strip().lower() == (h or "").strip().lower() for h in hl):
                 continue
-            target[idx].highlights = list(target[idx].highlights or []) + [bullet]
-            applied += 1
-        if applied:
-            import logging as _log
-            _log.getLogger("ai_job_cv_matcher.cv_render_routes").info(
-                "Applied %d ephemeral evidence bullet(s) to this render only", applied,
-            )
+            # Second position, not last. The page-fit loop trims trailing
+            # bullets, so an appended evidence bullet is the first thing
+            # cut -- the CV loses exactly the line that closes the gap.
+            # Slotting it behind the entry's strongest bullet keeps it
+            # safe from the trim and puts the JD-relevant proof high up
+            # where a recruiter scans.
+            entry.highlights = hl[:1] + [bullet] + hl[1:]
+        return out
+
+    if _ev_clean:
+        import logging as _log
+        _log.getLogger("ai_job_cv_matcher.cv_render_routes").info(
+            "Carrying %d ephemeral evidence bullet(s) into every render pass", len(_ev_clean),
+        )
 
     used_llm = False
     llm_skip_reason = ""
@@ -1042,7 +1109,7 @@ def render_tailored_cv(
     def _render_and_score(lib_in):
         """Render once and return (result, covered, missing, coverage)."""
         r = render_cv(
-            lib_in,
+            _with_ev(lib_in),
             job=job,
             max_selected_projects=plan.max_selected_projects,
             max_additional_projects=plan.max_additional_projects,
@@ -1116,7 +1183,7 @@ def render_tailored_cv(
         result, covered, missing, coverage = _render_and_score(library_out)
         # Re-run with compile_pdf=true.
         result = render_cv(
-            library_out,
+            _with_ev(library_out),
             job=job,
             max_selected_projects=plan.max_selected_projects,
             max_additional_projects=plan.max_additional_projects,
@@ -1132,7 +1199,7 @@ def render_tailored_cv(
     elif iterations_done == 0 and payload.compile_pdf:
         # First-pass render skipped PDF; compile now.
         result = render_cv(
-            library_out,
+            _with_ev(library_out),
             job=job,
             max_selected_projects=plan.max_selected_projects,
             max_additional_projects=plan.max_additional_projects,
@@ -1233,7 +1300,7 @@ def render_tailored_cv(
             if not cut_applied:
                 break  # exhausted every cut, accept whatever we have
             result = render_cv(
-                trimmed_lib,
+                _with_ev(trimmed_lib),
                 job=job,
                 max_selected_projects=caps[0],
                 max_additional_projects=caps[1],
@@ -1286,7 +1353,10 @@ def render_tailored_cv(
         _emit("scorecard", "Grading the CV like a recruiter")
         from app.services.cv_scorecard import build_scorecard
         scorecard = build_scorecard(
-            library=library_out,
+            # The evidenced library, matching the LaTeX being graded.
+            # Grading the un-evidenced one left approved skills sitting
+            # at 'mentioned' even though their bullet was on the page.
+            library=_with_ev(library_out),
             job=job,
             latex=result.latex,
             ats_score=ats_score,
