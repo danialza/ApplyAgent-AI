@@ -381,6 +381,48 @@ def metrics_apply(payload: dict, db: Session = Depends(get_db)) -> dict:
     return {"applied": [r for r in results if r["rewritten"]], "results": results}
 
 
+@router.post("/evidence/questions")
+def evidence_questions(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """Ask where the candidate actually used each unevidenced skill.
+
+    Body: {"skills": ["n8n", "OpenAI API", ...]} — typically the
+    scorecard's `required_unevidenced` plus any missing skills the user
+    knows but never wrote down.
+    """
+    from app.services.evidence_harvester import generate_questions
+    skills = [s for s in (payload or {}).get("skills", []) if str(s).strip()]
+    return {"questions": generate_questions(db, skills)}
+
+
+@router.post("/evidence/apply")
+def evidence_apply(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """Write the answers into the master CV as real, evidenced bullets.
+
+    Body: {"answers": [{skill, key, question, answer}]}. Each answer is
+    attached to the entry it belongs to and persisted as a user-patch,
+    so it survives rebuilds and shows up in every future tailored CV.
+    Answers that say "no" are remembered so the skill is never asked
+    about again.
+    """
+    from app.services.evidence_harvester import apply_answer
+    results = []
+    for a in (payload or {}).get("answers", []):
+        if not str(a.get("answer") or "").strip():
+            continue
+        results.append(apply_answer(
+            db,
+            skill=str(a.get("skill", "")),
+            key=str(a.get("key", "")),
+            question=str(a.get("question", "")),
+            answer=str(a.get("answer", "")),
+        ))
+    return {
+        "written": [r for r in results if r.get("status") == "written"],
+        "declined": [r for r in results if r.get("status") == "declined"],
+        "skipped": [r for r in results if r.get("status") == "skipped"],
+    }
+
+
 @router.post("/cover-letter")
 def cover_letter(payload: dict, db: Session = Depends(get_db)) -> dict:
     """Generate a plain-text cover letter for a JD, grounded in the

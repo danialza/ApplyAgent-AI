@@ -1,5 +1,11 @@
 "use client";
 
+import { useState } from "react";
+import {
+  applyEvidenceAnswers,
+  fetchEvidenceQuestions,
+  type EvidenceQuestion,
+} from "@/lib/api";
 import type { Scorecard, SkillEvidence } from "@/lib/types";
 
 const VERDICT_STYLE: Record<string, string> = {
@@ -160,11 +166,12 @@ export default function ScorecardPanel({ card }: { card: Scorecard }) {
               <SkillPills rows={cov.preferred} />
             </div>
           )}
-          {cov.required_unevidenced?.length > 0 && (
-            <p className="rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
-              Claimed but unproven: <b>{cov.required_unevidenced.join(", ")}</b> — a recruiter
-              looks for these in your bullets and won&apos;t find them.
-            </p>
+          {(cov.required_unevidenced?.length > 0 ||
+            cov.required_missing?.length > 0) && (
+            <EvidenceGap
+              unevidenced={cov.required_unevidenced || []}
+              missing={cov.required_missing || []}
+            />
           )}
         </div>
       )}
@@ -195,6 +202,144 @@ export default function ScorecardPanel({ card }: { card: Scorecard }) {
           Seniority: JD asks <b>{card.seniority.jd_level}</b>, CV reads as{" "}
           <b>{card.seniority.cv_reads_as}</b> — {card.seniority.note}
         </p>
+      )}
+    </div>
+  );
+}
+
+
+/** Turns "claimed but unproven" into real, evidenced experience.
+ *  Asks where the candidate actually used each skill and writes their
+ *  answer into the MASTER CV, so every future tailored CV can evidence
+ *  it truthfully. Nothing is written from a "no" answer. */
+function EvidenceGap({
+  unevidenced,
+  missing,
+}: {
+  unevidenced: string[];
+  missing: string[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [qs, setQs] = useState<EvidenceQuestion[]>([]);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<
+    { skill: string; entry: string; bullet: string }[] | null
+  >(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const all = [...unevidenced, ...missing];
+
+  async function load() {
+    setOpen(true);
+    setBusy(true);
+    setNote(null);
+    try {
+      const got = await fetchEvidenceQuestions(all);
+      setQs(got);
+      if (got.length === 0) setNote("Nothing left to ask — all of these are already answered.");
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "Could not load questions.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    const payload = qs
+      .filter((q) => (answers[q.key] || "").trim())
+      .map((q) => ({ ...q, answer: answers[q.key].trim() }));
+    if (payload.length === 0) {
+      setNote("Answer at least one — write \"no\" for anything you have not actually used.");
+      return;
+    }
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await applyEvidenceAnswers(payload);
+      setDone(res.written);
+      const bits: string[] = [];
+      if (res.written.length) bits.push(`${res.written.length} added to your master CV`);
+      if (res.declined.length) bits.push(`${res.declined.length} marked as "not used"`);
+      if (res.skipped.length) bits.push(`${res.skipped.length} skipped`);
+      setNote(bits.join(" · ") + " — re-render to see them evidenced.");
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "Save failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="rounded bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
+        {unevidenced.length > 0 && (
+          <p>
+            Claimed but unproven: <b>{unevidenced.join(", ")}</b> — a recruiter looks for
+            these in your bullets and won&apos;t find them.
+          </p>
+        )}
+        {missing.length > 0 && (
+          <p className="mt-0.5">
+            Not on the CV at all: <b>{missing.join(", ")}</b>.
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={load}
+          className="mt-1 rounded bg-amber-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-amber-700"
+        >
+          Add real evidence for these →
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 rounded border border-amber-300 bg-amber-50 p-2 text-[11px]">
+      <div className="flex items-center justify-between">
+        <span className="font-semibold text-amber-900">Add real evidence</span>
+        <button type="button" onClick={() => setOpen(false)} className="text-slate-500 hover:text-slate-800">✕</button>
+      </div>
+      <p className="text-amber-800">
+        Say where you actually used each one — the project or job, and what you built.
+        It gets written into your <b>master CV</b>, so it counts on every future
+        application, not just this one. Write <b>“no”</b> for anything you have not used
+        hands-on and it will never be asked again.
+      </p>
+      {busy && qs.length === 0 && <p className="text-slate-500">Loading…</p>}
+      {qs.map((q) => (
+        <label key={q.key} className="block">
+          <span className="font-medium text-slate-700">{q.question}</span>
+          <input
+            type="text"
+            value={answers[q.key] || ""}
+            onChange={(e) => setAnswers((a) => ({ ...a, [q.key]: e.target.value }))}
+            placeholder="e.g. Used n8n in the NSP workflow to route parsed enquiries into the CRM"
+            className="mt-1 w-full rounded border border-amber-300 px-2 py-1"
+          />
+        </label>
+      ))}
+      {done && done.length > 0 && (
+        <div className="rounded bg-white p-2">
+          <p className="font-semibold text-emerald-800">Added to your master CV:</p>
+          {done.map((d, i) => (
+            <p key={i} className="mt-1 text-slate-700">
+              <b>{d.entry}</b> — {d.bullet}
+            </p>
+          ))}
+        </div>
+      )}
+      {note && <p className="text-amber-900">{note}</p>}
+      {qs.length > 0 && (
+        <button
+          type="button"
+          onClick={save}
+          disabled={busy}
+          className="rounded bg-amber-600 px-3 py-1.5 font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+        >
+          {busy ? "Writing…" : "Save to master CV"}
+        </button>
       )}
     </div>
   );

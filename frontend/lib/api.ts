@@ -347,6 +347,37 @@ export async function applyMetricAnswers(
   return handle(res);
 }
 
+export interface EvidenceQuestion {
+  skill: string;
+  key: string;
+  question: string;
+}
+
+export async function fetchEvidenceQuestions(skills: string[]): Promise<EvidenceQuestion[]> {
+  const res = await fetch(`${API_BASE}/api/cv/evidence/questions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ skills }),
+  });
+  const d = await handle<{ questions: EvidenceQuestion[] }>(res);
+  return d.questions || [];
+}
+
+export async function applyEvidenceAnswers(
+  answers: (EvidenceQuestion & { answer: string })[]
+): Promise<{
+  written: { skill: string; entry: string; bullet: string }[];
+  declined: { skill: string }[];
+  skipped: { reason?: string }[];
+}> {
+  const res = await fetch(`${API_BASE}/api/cv/evidence/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answers }),
+  });
+  return handle(res);
+}
+
 export async function generateCoverLetter(input: {
   job_text: string;
   tone?: string;
