@@ -201,6 +201,28 @@ rp-logs: ## Tail the rejection-proof stack logs.
 rp-clean: ## Stop it and delete ONLY its isolated volumes.
 	$(COMPOSE_UNSET) $(RP_COMPOSE) down -v
 
+# ---- Rejection-proof stack on LIVE data (ports 3400 / 8400) ----
+# Same code as the 3300 validation stack, but pointed at the REAL
+# database, so tracked applications and harvested metrics land in the
+# master CV / tracker you actually use. Runs alongside 3000.
+
+RP2_COMPOSE := docker compose -f docker-compose.rp-live.yml $(COMPOSE_ENV_FILES)
+
+.PHONY: rp2-up
+rp2-up: ## Build + start the rejection-proof stack on LIVE data (3400 / 8400).
+	$(COMPOSE_UNSET) $(RP2_COMPOSE) up --build -d
+	@echo ""
+	@echo "RP-live Backend  → http://localhost:8400  (docs at /docs)"
+	@echo "RP-live Frontend → http://localhost:3400   [shares the live DB]"
+
+.PHONY: rp2-down
+rp2-down: ## Stop it (the shared live DB is untouched).
+	$(COMPOSE_UNSET) $(RP2_COMPOSE) down
+
+.PHONY: rp2-logs
+rp2-logs: ## Tail its logs.
+	$(COMPOSE_UNSET) $(RP2_COMPOSE) logs -f --tail=100
+
 # ---- Help ----
 
 .PHONY: help

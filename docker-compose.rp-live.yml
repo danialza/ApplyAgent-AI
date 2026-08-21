@@ -1,0 +1,86 @@
+# AI Job-CV Matching Agent — REJECTION-PROOF variant (LIVE data).
+#
+# An isolated third stack for testing the batch autopilot (section 7)
+# WITHOUT touching the stacks you use day-to-day (3000/8000 API-key,
+# 3100/8100 subscription). It shares the same database volume, so JDs it
+# tailors land in the SAME Applications tracker.
+#
+#     make rp2-up      # build + start on 3400 / 8400
+#     make rp2-down
+#
+# Frontend → http://localhost:3400
+# Backend  → http://localhost:8400   (Swagger at /docs)
+#
+# LLM: uses the ANTHROPIC_API_KEY from .env (batch = many renders, so
+# the billed API is more reliable than the subscription session limit).
+
+name: applyagent-rp-live
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: ai-job-cv-matcher-backend-rp-live
+    container_name: ai-job-cv-backend-rp-live
+    restart: unless-stopped
+    ports:
+      - "${RP2_BACKEND_PORT:-8400}:8000"
+    environment:
+      APP_DB_URL: sqlite:////data/app.db
+      APP_INDEX_DIR: /data/index
+      APP_CORS_ORIGINS: ${RP2_CORS_ORIGINS:-http://localhost:3400}
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
+
+      USE_LLM_EXTRACTION: ${USE_LLM_EXTRACTION:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-120}
+      LATEX_COMPILE_TIMEOUT_SECONDS: ${LATEX_COMPILE_TIMEOUT_SECONDS:-180}
+      XDG_CACHE_HOME: /data/tectonic_cache
+      APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+    volumes:
+      # SHARED live database — same volume as the 3000/8000 stack, so
+      # this is a real second UI onto your actual master CV and
+      # tracker, not a sandbox. Declared external below so `down -v`
+      # can never delete it.
+      - applyagentai_backend_data:/data
+      - hf_cache_rp_live:/data/hf_cache
+      - ./docs:/app/docs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${RP2_NEXT_PUBLIC_API_URL:-http://localhost:8400}
+    image: ai-job-cv-matcher-frontend-rp-live
+    container_name: ai-job-cv-frontend-rp-live
+    restart: unless-stopped
+    ports:
+      - "${RP2_FRONTEND_PORT:-3400}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  applyagentai_backend_data:
+    external: true
+  hf_cache_rp_live:
