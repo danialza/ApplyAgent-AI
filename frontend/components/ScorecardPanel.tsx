@@ -1,11 +1,5 @@
 "use client";
 
-import { useState } from "react";
-import {
-  approveEvidence,
-  proposeEvidence,
-  type EvidenceDraft,
-} from "@/lib/api";
 import type { Scorecard, SkillEvidence } from "@/lib/types";
 
 const VERDICT_STYLE: Record<string, string> = {
@@ -208,13 +202,9 @@ export default function ScorecardPanel({ card }: { card: Scorecard }) {
 }
 
 
-/** Drafts the evidence for you, then you approve it.
- *  For each unproven skill the backend proposes WHICH project it belongs
- *  to, HOW it was used, and a metric — reusing a figure already in that
- *  entry when one fits, otherwise leaving a blank you must fill. A draft
- *  still holding a blank is refused on save, so no invented number can
- *  reach the CV by being clicked past. Approved drafts are written into
- *  the MASTER CV. */
+/** Reports the evidence gap. Fixing it happens on the NEXT render:
+ *  the pre-flight step drafts these, you approve them there, and they
+ *  apply to that PDF only — the master CV is never written to. */
 function EvidenceGap({
   unevidenced,
   missing,
@@ -222,189 +212,21 @@ function EvidenceGap({
   unevidenced: string[];
   missing: string[];
 }) {
-  const [open, setOpen] = useState(false);
-  const [drafts, setDrafts] = useState<EvidenceDraft[]>([]);
-  const [text, setText] = useState<Record<string, string>>({});
-  const [picked, setPicked] = useState<Record<string, boolean>>({});
-  const [confirmed, setConfirmed] = useState<Record<string, boolean>>({});
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-  const [saved, setSaved] = useState<{ skill: string; entry: string; bullet: string }[]>([]);
-
-  const all = [...unevidenced, ...missing];
-
-  async function load() {
-    setOpen(true);
-    setBusy(true);
-    setNote(null);
-    try {
-      const got = await proposeEvidence(all);
-      setDrafts(got);
-      setText(Object.fromEntries(got.map((d) => [d.key, d.bullet])));
-      setPicked(Object.fromEntries(got.map((d) => [d.key, true])));
-      setConfirmed({});
-      if (got.length === 0) setNote("Nothing to propose — these are already handled.");
-    } catch (e) {
-      setNote(e instanceof Error ? e.message : "Could not draft suggestions.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function save() {
-    const chosen = drafts
-      .filter((d) => picked[d.key])
-      .map((d) => ({
-        skill: d.skill,
-        key: d.key,
-        section: d.section,
-        index: d.index,
-        bullet: (text[d.key] || "").trim(),
-        metric_source: d.metric_source,
-        confirmed: d.metric_source === "from_master" || !!confirmed[d.key],
-      }));
-    if (chosen.length === 0) {
-      setNote("Tick at least one draft to add.");
-      return;
-    }
-    setBusy(true);
-    setNote(null);
-    try {
-      const res = await approveEvidence(chosen);
-      setSaved(res.written);
-      const bits: string[] = [];
-      if (res.written.length) bits.push(`${res.written.length} added to your master CV`);
-      if (res.needs_confirmation.length)
-        bits.push(
-          `${res.needs_confirmation.length} waiting on you to confirm the figure`
-        );
-      if (res.needs_number.length)
-        bits.push(`${res.needs_number.length} still has a blank — replace the ___ with your real figure`);
-      if (res.skipped.length) bits.push(`${res.skipped.length} skipped`);
-      setNote(bits.join(" · ") + (res.written.length ? " — re-render to see them evidenced." : ""));
-      if (res.written.length) {
-        const done = new Set(res.written.map((w) => w.skill));
-        setDrafts((ds) => ds.filter((d) => !done.has(d.skill)));
-      }
-    } catch (e) {
-      setNote(e instanceof Error ? e.message : "Save failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (!open) {
-    return (
-      <div className="rounded bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
-        {unevidenced.length > 0 && (
-          <p>
-            Claimed but unproven: <b>{unevidenced.join(", ")}</b> — a recruiter looks for
-            these in your bullets and won&apos;t find them.
-          </p>
-        )}
-        {missing.length > 0 && (
-          <p className="mt-0.5">Not on the CV at all: <b>{missing.join(", ")}</b>.</p>
-        )}
-        <button
-          type="button"
-          onClick={load}
-          className="mt-1 rounded bg-amber-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-amber-700"
-        >
-          Draft evidence for these →
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-2 rounded border border-amber-300 bg-amber-50 p-2 text-[11px]">
-      <div className="flex items-center justify-between">
-        <span className="font-semibold text-amber-900">Suggested evidence — review and approve</span>
-        <button type="button" onClick={() => setOpen(false)} className="text-slate-500 hover:text-slate-800">✕</button>
-      </div>
-      <p className="text-amber-800">
-        Each draft picks the project it most likely belongs to, how the tool was used, and
-        a figure. Where a real number already exists in that project it is reused as-is.
-        Otherwise you get a <b>suggested estimate</b> with the reasoning behind it — check
-        it, correct it in the text if it is off, and tick to confirm. Estimates will not
-        save unconfirmed. Untick anything you have not actually done.
+    <div className="rounded bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
+      {unevidenced.length > 0 && (
+        <p>
+          Claimed but unproven: <b>{unevidenced.join(", ")}</b> — a recruiter looks for
+          these in your bullets and won&apos;t find them.
+        </p>
+      )}
+      {missing.length > 0 && (
+        <p className="mt-0.5">Not on the CV at all: <b>{missing.join(", ")}</b>.</p>
+      )}
+      <p className="mt-1 text-amber-800">
+        Hit <b>Render tailored CV</b> again — you&apos;ll be offered a draft for each of
+        these to approve before the PDF is built.
       </p>
-      {busy && drafts.length === 0 && <p className="text-slate-500">Drafting…</p>}
-
-      {drafts.map((d) => (
-        <div key={d.key} className="rounded border border-amber-200 bg-white p-2">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={!!picked[d.key]}
-              onChange={(e) => setPicked((p) => ({ ...p, [d.key]: e.target.checked }))}
-              className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
-            />
-            <span className="font-semibold text-slate-800">{d.skill}</span>
-            <span className="text-slate-500">→ {d.entry_title}</span>
-            {d.metric_source === "from_master" ? (
-              <span className="ml-auto rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800">
-                figure already in this project
-              </span>
-            ) : (
-              <span className="ml-auto rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800">
-                suggested estimate — confirm it
-              </span>
-            )}
-          </label>
-          {d.usage && <p className="mt-1 text-slate-500">Suggested usage: {d.usage}</p>}
-          {d.metric_source !== "from_master" && (
-            <div className="mt-1 rounded bg-sky-50 px-2 py-1">
-              <p className="text-sky-900">
-                Suggested figure: <b>{d.metric_text || "—"}</b>
-                {d.metric_basis && (
-                  <span className="text-sky-700"> — {d.metric_basis}</span>
-                )}
-              </p>
-              <label className="mt-1 flex items-start gap-1.5 text-sky-900">
-                <input
-                  type="checkbox"
-                  checked={!!confirmed[d.key]}
-                  onChange={(e) =>
-                    setConfirmed((c) => ({ ...c, [d.key]: e.target.checked }))
-                  }
-                  className="mt-0.5 rounded border-sky-400 text-sky-600 focus:ring-sky-500"
-                />
-                <span>
-                  This figure is about right — or I have corrected it in the text below.
-                  <b> Required</b>, since an interviewer will ask about this number.
-                </span>
-              </label>
-            </div>
-          )}
-          <textarea
-            value={text[d.key] ?? d.bullet}
-            onChange={(e) => setText((t) => ({ ...t, [d.key]: e.target.value }))}
-            rows={2}
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-[11px]"
-          />
-        </div>
-      ))}
-
-      {saved.length > 0 && (
-        <div className="rounded bg-white p-2">
-          <p className="font-semibold text-emerald-800">Added to your master CV:</p>
-          {saved.map((w, i) => (
-            <p key={i} className="mt-1 text-slate-700"><b>{w.entry}</b> — {w.bullet}</p>
-          ))}
-        </div>
-      )}
-      {note && <p className="text-amber-900">{note}</p>}
-      {drafts.length > 0 && (
-        <button
-          type="button"
-          onClick={save}
-          disabled={busy}
-          className="rounded bg-amber-600 px-3 py-1.5 font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
-        >
-          {busy ? "Saving…" : "Approve & add to master CV"}
-        </button>
-      )}
     </div>
   );
 }

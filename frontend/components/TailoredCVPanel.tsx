@@ -11,8 +11,10 @@ import {
   fetchLLMStatus,
   generateCoverLetter,
   putCVLibrary,
+  preflightRender,
   renderCV,
   renderProgressUrl,
+  type EvidenceDraft,
   uploadMarkdownCV,
 } from "@/lib/api";
 import ScorecardPanel from "@/components/ScorecardPanel";
@@ -61,6 +63,14 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
   const [pinnedTitles, setPinnedTitles] = useState<string[]>([]);
   // true = LLM ranks + trims within the pick; false = force all picks.
   const [pinnedRank, setPinnedRank] = useState(true);
+  // Pre-render evidence review: drafts are shown BEFORE the PDF is
+  // built, applied to that render only, then discarded. Nothing is
+  // written to the master CV, so repeat tailoring can't silt it up.
+  const [evidenceDrafts, setEvidenceDrafts] = useState<EvidenceDraft[] | null>(null);
+  const [evText, setEvText] = useState<Record<string, string>>({});
+  const [evPicked, setEvPicked] = useState<Record<string, boolean>>({});
+  const [evConfirmed, setEvConfirmed] = useState<Record<string, boolean>>({});
+  const [preflighting, setPreflighting] = useState(false);
   // Coverage auto-boost target. Renderer loops the LLM up to 3 times
   // weaving missing JD keywords into existing bullets until coverage
   // hits this fraction (or the loop stalls).
@@ -326,6 +336,36 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
     } else {
       setDuplicate(null);
     }
+    // Pre-flight: draft the missing evidence and show it for approval
+    // BEFORE anything is rendered. Skipped when there is no JD.
+    if (jdt) {
+      setPreflighting(true);
+      try {
+        const pf = await preflightRender(jdt);
+        if (pf.drafts.length > 0) {
+          setEvidenceDrafts(pf.drafts);
+          setEvText(Object.fromEntries(pf.drafts.map((d) => [d.key, d.bullet])));
+          setEvPicked(Object.fromEntries(pf.drafts.map((d) => [d.key, true])));
+          setEvConfirmed({});
+          setPreflighting(false);
+          setBusy(false);
+          return;   // wait for the user to approve, then doRender()
+        }
+      } catch {
+        // Pre-flight is advisory — fall through and render as normal.
+      } finally {
+        setPreflighting(false);
+      }
+    }
+    await doRender([]);
+  }
+
+  async function doRender(
+    evidence: { section: string; index: number; bullet: string }[]
+  ) {
+    setBusy(true);
+    setResult(null);
+    setTrackedForThisRender(false);
     // Open the live-progress SSE stream before POSTing so we catch the
     // first stage event. Best-effort — render still works if SSE fails.
     const pid =
@@ -372,6 +412,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
         pinned_project_titles: pinnedTitles,
         pinned_rank: pinnedRank,
         progress_id: pid,
+        evidence_bullets: evidence,
       });
       setResult(data);
       if (data.compile_error && !data.compiled) {
@@ -752,10 +793,10 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
         <button
           type="button"
           onClick={handleRender}
-          disabled={busy || loadingLibrary || !library}
+          disabled={busy || preflighting || loadingLibrary || !library}
           className="ml-auto inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {busy ? "Rendering…" : "Render tailored CV"}
+          {preflighting ? "Checking the JD…" : busy ? "Rendering…" : "Render tailored CV"}
         </button>
       </div>
 
@@ -948,6 +989,109 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
           onDownloadLatex={downloadLatex}
           onDownloadPdf={downloadPdf}
         />
+      )}
+
+      {/* Pre-render evidence review. Approve, edit or drop each draft;
+          approved ones apply to THIS render only and are then gone. */}
+      {evidenceDrafts && evidenceDrafts.length > 0 && (
+        <div className="space-y-2 rounded-lg border border-sky-300 bg-sky-50 p-3 text-xs">
+          <p className="text-sm font-semibold text-sky-900">
+            This JD asks for {evidenceDrafts.length} thing{evidenceDrafts.length > 1 ? "s" : ""} your CV
+            doesn&apos;t evidence — add them to this CV?
+          </p>
+          <p className="text-sky-800">
+            These go into <b>this one PDF only</b>. Nothing is saved to your master CV, so
+            tailoring never silts it up. Untick anything you haven&apos;t actually done, and
+            correct any figure that&apos;s off.
+          </p>
+
+          {evidenceDrafts.map((d) => (
+            <div key={d.key} className="rounded border border-sky-200 bg-white p-2">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={!!evPicked[d.key]}
+                  onChange={(e) => setEvPicked((v) => ({ ...v, [d.key]: e.target.checked }))}
+                  className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                />
+                <span className="font-semibold text-slate-800">{d.skill}</span>
+                <span className="text-slate-500">→ {d.entry_title}</span>
+                {d.metric_source === "from_master" ? (
+                  <span className="ml-auto rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800">
+                    figure already in this project
+                  </span>
+                ) : (
+                  <span className="ml-auto rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800">
+                    suggested estimate
+                  </span>
+                )}
+              </label>
+              {d.metric_source !== "from_master" && (
+                <div className="mt-1 rounded bg-sky-50 px-2 py-1">
+                  <p className="text-sky-900">
+                    Suggested figure: <b>{d.metric_text || "—"}</b>
+                    {d.metric_basis && <span className="text-sky-700"> — {d.metric_basis}</span>}
+                  </p>
+                  <label className="mt-1 flex items-start gap-1.5 text-sky-900">
+                    <input
+                      type="checkbox"
+                      checked={!!evConfirmed[d.key]}
+                      onChange={(e) => setEvConfirmed((v) => ({ ...v, [d.key]: e.target.checked }))}
+                      className="mt-0.5 rounded border-sky-400 text-sky-600 focus:ring-sky-500"
+                    />
+                    <span>This figure is about right — or I&apos;ve corrected it below. <b>Required</b>.</span>
+                  </label>
+                </div>
+              )}
+              <textarea
+                value={evText[d.key] ?? d.bullet}
+                onChange={(e) => setEvText((t) => ({ ...t, [d.key]: e.target.value }))}
+                rows={2}
+                className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-[11px]"
+              />
+            </div>
+          ))}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const approved = evidenceDrafts
+                  .filter(
+                    (d) =>
+                      evPicked[d.key] &&
+                      (d.metric_source === "from_master" || evConfirmed[d.key])
+                  )
+                  .map((d) => ({
+                    section: d.section,
+                    index: d.index,
+                    bullet: (evText[d.key] || "").trim(),
+                  }));
+                setEvidenceDrafts(null);
+                doRender(approved);
+              }}
+              className="rounded bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-800"
+            >
+              Build the CV with these
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEvidenceDrafts(null);
+                doRender([]);
+              }}
+              className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Skip — build without them
+            </button>
+            <span className="text-[11px] text-sky-800">
+              {evidenceDrafts.filter(
+                (d) => evPicked[d.key] && (d.metric_source === "from_master" || evConfirmed[d.key])
+              ).length}{" "}
+              of {evidenceDrafts.length} ready
+            </span>
+          </div>
+        </div>
       )}
 
       {/* Recruiter scorecard — evidence-graded coverage, hard gates,

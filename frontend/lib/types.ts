@@ -425,6 +425,8 @@ export interface RenderCVRequest {
   /** Client-generated id to receive live stage events over SSE
    *  (GET /api/cv/render/progress/{id}). */
   progress_id?: string;
+  /** Evidence bullets approved for THIS render only — never persisted. */
+  evidence_bullets?: { section: string; index: number; bullet: string }[];
 }
 
 export interface SectionPlanOut {

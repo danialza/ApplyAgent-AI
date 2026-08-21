@@ -570,6 +570,12 @@ class RenderCVRequest(BaseModel):
     # stage events to the progress bus; the UI subscribes via
     # GET /api/cv/render/progress/{id} (SSE) to show a progress bar.
     progress_id: str = ""
+    # Evidence bullets approved for THIS RENDER ONLY.
+    # [{"section": str, "index": int, "bullet": str}] — merged into an
+    # in-memory copy of the library before tailoring and discarded when
+    # the response is returned. Deliberately never persisted: the master
+    # CV must not accumulate per-JD phrasing over time.
+    evidence_bullets: list[dict] = Field(default_factory=list)
 
 
 class RenderCVResponse(BaseModel):

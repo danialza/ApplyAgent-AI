@@ -394,6 +394,49 @@ def evidence_questions(payload: dict, db: Session = Depends(get_db)) -> dict:
     return {"questions": generate_questions(db, skills)}
 
 
+@router.post("/render/preflight")
+def render_preflight(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """Look at a JD BEFORE rendering and draft the missing evidence.
+
+    Body: {"job_text": str}. Parses the JD, works out which required /
+    preferred skills the master CV does not evidence, and returns a
+    draft bullet for each — project, usage, and a figure.
+
+    Nothing is rendered and nothing is written. The approved drafts come
+    back on POST /render as `evidence_bullets`, which apply to that one
+    render only, so the master CV never accumulates per-JD phrasing.
+    """
+    from app.services.cv_scorecard import coverage_breakdown
+    from app.services.evidence_harvester import propose
+
+    row = db.query(CVLibrary).filter(CVLibrary.id == 1).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No CV library yet.")
+    job_text = str((payload or {}).get("job_text", "")).strip()
+    if not job_text:
+        return {"drafts": [], "job_title": "", "job_company": "", "gaps": []}
+
+    parsed = extract_job(job_text)
+    job = JobParsed(**parsed.to_dict())
+    library_out = _to_out(row)
+
+    # Grade against the library itself (no rendered LaTeX yet), so a
+    # skill only counts as evidenced when a real bullet carries it.
+    cov = coverage_breakdown(library_out, job)
+    gaps = list(cov.get("required_unevidenced", [])) + list(cov.get("required_missing", []))
+    # Preferred-stack items that are entirely absent are worth offering too.
+    gaps += [r["skill"] for r in cov.get("preferred", []) if r["state"] == "missing"]
+    seen: set[str] = set()
+    ordered = [g for g in gaps if not (g.lower() in seen or seen.add(g.lower()))]
+
+    return {
+        "drafts": propose(db, ordered[:8]) if ordered else [],
+        "gaps": ordered,
+        "job_title": job.job_title or "",
+        "job_company": job.company or "",
+    }
+
+
 @router.post("/evidence/propose")
 def evidence_propose(payload: dict, db: Session = Depends(get_db)) -> dict:
     """Draft a bullet per unevidenced skill for the candidate to approve.
@@ -912,6 +955,36 @@ def render_tailored_cv(
         job = JobParsed(**parsed.to_dict())
 
     library_out = _to_out(row)
+
+    # ---- Ephemeral evidence: bullets the user approved for THIS render.
+    # Applied to the in-memory library only. Nothing is written back, so
+    # repeated tailoring can never silt up the master CV with per-JD
+    # phrasing. Same guards as the persistent path.
+    _ev = [e for e in (getattr(payload, "evidence_bullets", None) or [])]
+    if _ev:
+        from app.services.evidence_harvester import has_placeholder
+        from app.services.text_guard import clean_bullet, has_meta
+        applied = 0
+        for e in _ev:
+            section = str(e.get("section", ""))
+            try:
+                idx = int(e.get("index", -1))
+            except (TypeError, ValueError):
+                continue
+            bullet = clean_bullet("", str(e.get("bullet", "")).strip())
+            if not bullet or len(bullet) < 25 or has_meta(bullet) or has_placeholder(bullet):
+                continue
+            target = getattr(library_out, section, None)
+            if target is None or not (0 <= idx < len(target)):
+                continue
+            target[idx].highlights = list(target[idx].highlights or []) + [bullet]
+            applied += 1
+        if applied:
+            import logging as _log
+            _log.getLogger("ai_job_cv_matcher.cv_render_routes").info(
+                "Applied %d ephemeral evidence bullet(s) to this render only", applied,
+            )
+
     used_llm = False
     llm_skip_reason = ""
 
