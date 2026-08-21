@@ -427,7 +427,7 @@ _LATEX_TEMPLATE = r"""
 \section{Education \hrulefill}
 <% for e in education %>
 \begin{onecolentry}
-\textbf{<< e.institution | latex >>}, << e.degree | latex >> \hfill << e.period | latex >>
+\textbf{<< e.degree | latex >>}, << e.institution | latex >> \hfill << e.period | latex >>
 <% if e.highlights %>
 \begin{highlights}
 <% for h in e.highlights %>

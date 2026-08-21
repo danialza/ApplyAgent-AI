@@ -394,6 +394,42 @@ def evidence_questions(payload: dict, db: Session = Depends(get_db)) -> dict:
     return {"questions": generate_questions(db, skills)}
 
 
+@router.post("/evidence/propose")
+def evidence_propose(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """Draft a bullet per unevidenced skill for the candidate to approve.
+
+    Body: {"skills": [...]}. Each draft names the project it belongs to,
+    how the tool was probably used, and a metric — reusing a figure that
+    already appears in that entry when one fits, otherwise returning an
+    explicit placeholder rather than inventing a number.
+    """
+    from app.services.evidence_harvester import propose
+    skills = [s for s in (payload or {}).get("skills", []) if str(s).strip()]
+    return {"drafts": propose(db, skills)}
+
+
+@router.post("/evidence/approve")
+def evidence_approve(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """Save reviewed drafts. Body: {"drafts": [{skill, key, section,
+    index, bullet}]}. Anything still holding a blank is rejected."""
+    from app.services.evidence_harvester import apply_bullet
+    results = []
+    for d in (payload or {}).get("drafts", []):
+        results.append(apply_bullet(
+            db,
+            skill=str(d.get("skill", "")),
+            key=str(d.get("key", "")),
+            section=str(d.get("section", "")),
+            index=int(d.get("index", -1)),
+            bullet=str(d.get("bullet", "")),
+        ))
+    return {
+        "written": [r for r in results if r.get("status") == "written"],
+        "needs_number": [r for r in results if r.get("status") == "needs_number"],
+        "skipped": [r for r in results if r.get("status") == "skipped"],
+    }
+
+
 @router.post("/evidence/apply")
 def evidence_apply(payload: dict, db: Session = Depends(get_db)) -> dict:
     """Write the answers into the master CV as real, evidenced bullets.

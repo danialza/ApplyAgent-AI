@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import {
-  applyEvidenceAnswers,
-  fetchEvidenceQuestions,
-  type EvidenceQuestion,
+  approveEvidence,
+  proposeEvidence,
+  type EvidenceDraft,
 } from "@/lib/api";
 import type { Scorecard, SkillEvidence } from "@/lib/types";
 
@@ -208,10 +208,13 @@ export default function ScorecardPanel({ card }: { card: Scorecard }) {
 }
 
 
-/** Turns "claimed but unproven" into real, evidenced experience.
- *  Asks where the candidate actually used each skill and writes their
- *  answer into the MASTER CV, so every future tailored CV can evidence
- *  it truthfully. Nothing is written from a "no" answer. */
+/** Drafts the evidence for you, then you approve it.
+ *  For each unproven skill the backend proposes WHICH project it belongs
+ *  to, HOW it was used, and a metric — reusing a figure already in that
+ *  entry when one fits, otherwise leaving a blank you must fill. A draft
+ *  still holding a blank is refused on save, so no invented number can
+ *  reach the CV by being clicked past. Approved drafts are written into
+ *  the MASTER CV. */
 function EvidenceGap({
   unevidenced,
   missing,
@@ -220,13 +223,12 @@ function EvidenceGap({
   missing: string[];
 }) {
   const [open, setOpen] = useState(false);
-  const [qs, setQs] = useState<EvidenceQuestion[]>([]);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useState<EvidenceDraft[]>([]);
+  const [text, setText] = useState<Record<string, string>>({});
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<
-    { skill: string; entry: string; bullet: string }[] | null
-  >(null);
   const [note, setNote] = useState<string | null>(null);
+  const [saved, setSaved] = useState<{ skill: string; entry: string; bullet: string }[]>([]);
 
   const all = [...unevidenced, ...missing];
 
@@ -235,34 +237,41 @@ function EvidenceGap({
     setBusy(true);
     setNote(null);
     try {
-      const got = await fetchEvidenceQuestions(all);
-      setQs(got);
-      if (got.length === 0) setNote("Nothing left to ask — all of these are already answered.");
+      const got = await proposeEvidence(all);
+      setDrafts(got);
+      setText(Object.fromEntries(got.map((d) => [d.key, d.bullet])));
+      setPicked(Object.fromEntries(got.map((d) => [d.key, !d.needs_number])));
+      if (got.length === 0) setNote("Nothing to propose — these are already handled.");
     } catch (e) {
-      setNote(e instanceof Error ? e.message : "Could not load questions.");
+      setNote(e instanceof Error ? e.message : "Could not draft suggestions.");
     } finally {
       setBusy(false);
     }
   }
 
   async function save() {
-    const payload = qs
-      .filter((q) => (answers[q.key] || "").trim())
-      .map((q) => ({ ...q, answer: answers[q.key].trim() }));
-    if (payload.length === 0) {
-      setNote("Answer at least one — write \"no\" for anything you have not actually used.");
+    const chosen = drafts
+      .filter((d) => picked[d.key])
+      .map((d) => ({ skill: d.skill, key: d.key, section: d.section, index: d.index, bullet: (text[d.key] || "").trim() }));
+    if (chosen.length === 0) {
+      setNote("Tick at least one draft to add.");
       return;
     }
     setBusy(true);
     setNote(null);
     try {
-      const res = await applyEvidenceAnswers(payload);
-      setDone(res.written);
+      const res = await approveEvidence(chosen);
+      setSaved(res.written);
       const bits: string[] = [];
       if (res.written.length) bits.push(`${res.written.length} added to your master CV`);
-      if (res.declined.length) bits.push(`${res.declined.length} marked as "not used"`);
+      if (res.needs_number.length)
+        bits.push(`${res.needs_number.length} still has a blank — replace the ___ with your real figure`);
       if (res.skipped.length) bits.push(`${res.skipped.length} skipped`);
-      setNote(bits.join(" · ") + " — re-render to see them evidenced.");
+      setNote(bits.join(" · ") + (res.written.length ? " — re-render to see them evidenced." : ""));
+      if (res.written.length) {
+        const done = new Set(res.written.map((w) => w.skill));
+        setDrafts((ds) => ds.filter((d) => !done.has(d.skill)));
+      }
     } catch (e) {
       setNote(e instanceof Error ? e.message : "Save failed.");
     } finally {
@@ -280,16 +289,14 @@ function EvidenceGap({
           </p>
         )}
         {missing.length > 0 && (
-          <p className="mt-0.5">
-            Not on the CV at all: <b>{missing.join(", ")}</b>.
-          </p>
+          <p className="mt-0.5">Not on the CV at all: <b>{missing.join(", ")}</b>.</p>
         )}
         <button
           type="button"
           onClick={load}
           className="mt-1 rounded bg-amber-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-amber-700"
         >
-          Add real evidence for these →
+          Draft evidence for these →
         </button>
       </div>
     );
@@ -298,47 +305,65 @@ function EvidenceGap({
   return (
     <div className="space-y-2 rounded border border-amber-300 bg-amber-50 p-2 text-[11px]">
       <div className="flex items-center justify-between">
-        <span className="font-semibold text-amber-900">Add real evidence</span>
+        <span className="font-semibold text-amber-900">Suggested evidence — review and approve</span>
         <button type="button" onClick={() => setOpen(false)} className="text-slate-500 hover:text-slate-800">✕</button>
       </div>
       <p className="text-amber-800">
-        Say where you actually used each one — the project or job, and what you built.
-        It gets written into your <b>master CV</b>, so it counts on every future
-        application, not just this one. Write <b>“no”</b> for anything you have not used
-        hands-on and it will never be asked again.
+        Each draft picks the project it most likely belongs to and how the tool was used.
+        Where a real number already exists in that project it is reused; otherwise you get
+        a <b>___</b> blank — fill it with your real figure. A draft still holding a blank
+        will not save. Untick anything you have not actually done.
       </p>
-      {busy && qs.length === 0 && <p className="text-slate-500">Loading…</p>}
-      {qs.map((q) => (
-        <label key={q.key} className="block">
-          <span className="font-medium text-slate-700">{q.question}</span>
-          <input
-            type="text"
-            value={answers[q.key] || ""}
-            onChange={(e) => setAnswers((a) => ({ ...a, [q.key]: e.target.value }))}
-            placeholder="e.g. Used n8n in the NSP workflow to route parsed enquiries into the CRM"
-            className="mt-1 w-full rounded border border-amber-300 px-2 py-1"
+      {busy && drafts.length === 0 && <p className="text-slate-500">Drafting…</p>}
+
+      {drafts.map((d) => (
+        <div key={d.key} className="rounded border border-amber-200 bg-white p-2">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={!!picked[d.key]}
+              onChange={(e) => setPicked((p) => ({ ...p, [d.key]: e.target.checked }))}
+              className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+            />
+            <span className="font-semibold text-slate-800">{d.skill}</span>
+            <span className="text-slate-500">→ {d.entry_title}</span>
+            {d.metric_source === "from_master" ? (
+              <span className="ml-auto rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800">
+                number reused from this project
+              </span>
+            ) : (
+              <span className="ml-auto rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                needs your number
+              </span>
+            )}
+          </label>
+          {d.usage && <p className="mt-1 text-slate-500">Suggested usage: {d.usage}</p>}
+          <textarea
+            value={text[d.key] ?? d.bullet}
+            onChange={(e) => setText((t) => ({ ...t, [d.key]: e.target.value }))}
+            rows={2}
+            className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-[11px]"
           />
-        </label>
+        </div>
       ))}
-      {done && done.length > 0 && (
+
+      {saved.length > 0 && (
         <div className="rounded bg-white p-2">
           <p className="font-semibold text-emerald-800">Added to your master CV:</p>
-          {done.map((d, i) => (
-            <p key={i} className="mt-1 text-slate-700">
-              <b>{d.entry}</b> — {d.bullet}
-            </p>
+          {saved.map((w, i) => (
+            <p key={i} className="mt-1 text-slate-700"><b>{w.entry}</b> — {w.bullet}</p>
           ))}
         </div>
       )}
       {note && <p className="text-amber-900">{note}</p>}
-      {qs.length > 0 && (
+      {drafts.length > 0 && (
         <button
           type="button"
           onClick={save}
           disabled={busy}
           className="rounded bg-amber-600 px-3 py-1.5 font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
         >
-          {busy ? "Writing…" : "Save to master CV"}
+          {busy ? "Saving…" : "Approve & add to master CV"}
         </button>
       )}
     </div>

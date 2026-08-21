@@ -363,6 +363,44 @@ export async function fetchEvidenceQuestions(skills: string[]): Promise<Evidence
   return d.questions || [];
 }
 
+export interface EvidenceDraft {
+  skill: string;
+  key: string;
+  section: string;
+  index: number;
+  entry_title: string;
+  usage: string;
+  metric_text: string;
+  metric_source: string;
+  bullet: string;
+  needs_number: boolean;
+}
+
+export async function proposeEvidence(skills: string[]): Promise<EvidenceDraft[]> {
+  const res = await fetch(`${API_BASE}/api/cv/evidence/propose`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ skills }),
+  });
+  const d = await handle<{ drafts: EvidenceDraft[] }>(res);
+  return d.drafts || [];
+}
+
+export async function approveEvidence(
+  drafts: { skill: string; key: string; section: string; index: number; bullet: string }[]
+): Promise<{
+  written: { skill: string; entry: string; bullet: string }[];
+  needs_number: { skill: string; reason: string }[];
+  skipped: { skill: string; reason: string }[];
+}> {
+  const res = await fetch(`${API_BASE}/api/cv/evidence/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ drafts }),
+  });
+  return handle(res);
+}
+
 export async function applyEvidenceAnswers(
   answers: (EvidenceQuestion & { answer: string })[]
 ): Promise<{
