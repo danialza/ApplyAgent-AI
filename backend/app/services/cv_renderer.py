@@ -64,7 +64,15 @@ def latex_escape(value: str) -> str:
     """
     if value is None:
         return ""
-    return _LATEX_ESCAPE_RE.sub(lambda m: _LATEX_ESCAPE_MAP[m.group(0)], str(value))
+    # Sweep stray non-Latin marks / zero-width / control characters
+    # before escaping. This is the last common chokepoint every string
+    # in the document passes through, so a bad keystroke anywhere in the
+    # library (a publication status, a cert name, a skill) cannot reach
+    # the PDF as a visible blob or corrupt ATS extraction.
+    from app.services.text_guard import strip_stray
+    return _LATEX_ESCAPE_RE.sub(
+        lambda m: _LATEX_ESCAPE_MAP[m.group(0)], strip_stray(str(value))
+    )
 
 
 def _bold_matches(text: str, terms: list[str]) -> str:
@@ -348,7 +356,7 @@ _LATEX_TEMPLATE = r"""
     \usepackage{lmodern}
 \fi
 
-% XCharter — modern Charter with proper weight axes. Bold renders
+% XCharter - modern Charter with proper weight axes. Bold renders
 % visibly heavier than legacy `charter` package (which user said
 % looked flat). Fallback to charter is automatic via TeX Live.
 \usepackage{XCharter}
@@ -392,7 +400,7 @@ _LATEX_TEMPLATE = r"""
 
     \vspace{3pt}
 
-    % Contact line — small + tight separators so 5+ items fit one line.
+    % Contact line - small + tight separators so 5+ items fit one line.
     {\small << header_line >>}
 \end{center}
 
@@ -852,9 +860,16 @@ def render_cv(
         # typeset. Every bullet AND the summary flow through here, so a
         # leak from ANY upstream path (polish, coverage boost, enhance,
         # even a contaminated stored bullet) is caught at render time.
-        from app.services.text_guard import has_meta, strip_meta
+        from app.services.text_guard import (
+            has_meta, strip_dashes, strip_meta, strip_stray,
+        )
+        text = strip_stray(text)
         if text and has_meta(text):
             text = strip_meta(text)
+        # Em/en dashes read as machine-written; rewrite them as ordinary
+        # punctuation. Deterministic, so it catches every source —
+        # library text, polish rewrites, boosted bullets, evidence.
+        text = strip_dashes(text)
         # Order matters: JD-skill bolding runs against the escaped
         # text first, then metric bolding catches quantified impact
         # (5+ years, 30%, $1M, 10x). _bold_metrics is nest-safe so
@@ -863,6 +878,22 @@ def render_cv(
         escaped = latex_escape(text or "")
         escaped = _bold_matches(escaped, bold_terms)
         return _bold_metrics(escaped)
+
+    def render_title(text: str) -> str:
+        """Titles get the same no-dash treatment, but a dash separating
+        two halves of a title reads better as a colon than a comma."""
+        from app.services.text_guard import strip_dashes, strip_stray
+        t = strip_stray((text or "").strip())
+        if "\u2014" in t or "\u2013" in t:
+            import re as _re
+            t = _re.sub(r"\s*[\u2014\u2013]\s*", ": ", t, count=1)
+            t = strip_dashes(t)
+        return t
+
+    def render_period(text: str) -> str:
+        """Date ranges use a plain hyphen: no en dashes anywhere."""
+        import re as _re
+        return _re.sub(r"\s*[\u2014\u2013]\s*", " - ", (text or "").strip())
 
     def render_skill_items(items: list[str]) -> str:
         # Skills line: keep items plain. The group label is already
@@ -910,7 +941,7 @@ def render_cv(
             out.append({
                 "institution": inst,
                 "degree": deg,
-                "period": e.period,
+                "period": render_period(e.period),
                 "highlights": [r for h in (e.highlights or []) if (r := render_bullet(h))],
             })
         return out
@@ -926,8 +957,8 @@ def render_cv(
             raw_url = (getattr(p, "url", "") or "").strip()
             project_url = _with_utm(raw_url, utm_campaign) if raw_url else ""
             out.append({
-                "title": title,
-                "period": p.period,
+                "title": render_title(title),
+                "period": render_period(p.period),
                 "url": project_url,
                 "highlights": [r for h in (p.highlights or []) if (r := render_bullet(h))],
             })
@@ -940,9 +971,9 @@ def render_cv(
             if not title:
                 continue
             out.append({
-                "title": title,
-                "company": x.company,
-                "period": x.period,
+                "title": render_title(title),
+                "company": render_title(x.company),
+                "period": render_period(x.period),
                 "highlights": [r for h in (x.highlights or []) if (r := render_bullet(h))],
             })
         return out

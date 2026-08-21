@@ -58,7 +58,9 @@ def generate_cover_letter(
         "thrilled', 'passionate about', 'delve into', 'leverage my', "
         "'seamlessly', 'in today's fast-paced world', 'testament to', "
         "'align with your mission', 'I believe I would be a great fit', "
-        "'robust and scalable solutions'. Write the way a competent "
+        "'robust and scalable solutions'. Never use an em dash or en "
+        "dash (- or -); write ordinary commas and full stops. Write the "
+        "way a competent "
         "engineer writes an email: direct sentences, concrete nouns, no "
         "throat-clearing. Vary sentence length. Never open with 'I am "
         "writing to apply'.\n"
@@ -81,7 +83,8 @@ def generate_cover_letter(
         logger.warning("cover letter generation failed: %s", exc)
         return "", f"LLM call failed: {exc}"
 
-    text = (text or "").strip()
+    from app.services.text_guard import strip_dashes
+    text = strip_dashes((text or "").strip())
     # Strip accidental markdown fences / headers.
     if text.startswith("```"):
         text = text.strip("`").strip()

@@ -157,3 +157,65 @@ def clean_text_block(text: str) -> str:
         else:
             kept.append(s.strip())
     return " ".join(kept).strip()
+
+
+# ---------- dash removal ----------
+
+# Em/en dashes are a strong "written by a model" tell and the user does
+# not want them in CV or letter prose. Hyphens inside real compound
+# terms (sim-to-real, multi-GPU, FastAPI-based) are untouched — only the
+# free-standing em/en dash used as punctuation is rewritten.
+_DASH_SPACED = re.compile(r"\s*[\u2014\u2013]\s*")     # — or – with any spacing
+_DOUBLE_PUNCT = re.compile(r",\s*([,.;:])")
+_SPACE_BEFORE_PUNCT = re.compile(r"\s+([,.;:])")
+
+
+def strip_dashes(text: str) -> str:
+    """Rewrite em/en-dash punctuation as ordinary prose.
+
+    " — " becomes ", ". A dash immediately before a capitalised clause
+    that already ends a sentence collapses cleanly; doubled or dangling
+    punctuation left behind is tidied up.
+    """
+    if not text:
+        return text
+    if "\u2014" not in text and "\u2013" not in text:
+        return text
+    out = _DASH_SPACED.sub(", ", text)
+    out = _DOUBLE_PUNCT.sub(r"\1", out)          # ", ." -> "."
+    out = _SPACE_BEFORE_PUNCT.sub(r"\1", out)    # " ," -> ","
+    out = re.sub(r",\s*$", "", out.strip())      # trailing comma
+    out = re.sub(r"\s{2,}", " ", out)
+    return out.strip()
+
+
+# ---------- stray-character sanitiser ----------
+
+# Characters that have no business in an English CV and that a stray
+# keystroke on a non-Latin layout can silently inject. They survive into
+# the PDF as a visible blob and can corrupt ATS text extraction, so
+# every rendered string is swept.
+_STRAY = re.compile(
+    "["
+    "\u0600-\u06FF"      # Arabic block (diacritics, tatweel, digits)
+    "\u0750-\u077F"      # Arabic supplement
+    "\uFB50-\uFDFF\uFE70-\uFEFF"   # Arabic presentation forms
+    "\u0590-\u05FF"      # Hebrew
+    "\u200B-\u200F\u202A-\u202E\u2060\uFEFF"  # zero-width + bidi marks
+    "\u00AD"              # soft hyphen
+    "\uFFFD"              # replacement char
+    "]"
+)
+_CONTROL = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
+
+
+def strip_stray(text: str) -> str:
+    """Remove stray non-Latin marks, zero-width/bidi characters and
+    control codes, then tidy the whitespace they leave behind."""
+    if not text:
+        return text
+    out = _CONTROL.sub("", text)
+    out = _STRAY.sub("", out)
+    if out != text:
+        out = re.sub(r"\s{2,}", " ", out).strip()
+    return out
