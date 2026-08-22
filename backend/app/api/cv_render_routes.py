@@ -427,7 +427,11 @@ def render_preflight(payload: dict, db: Session = Depends(get_db)) -> dict:
 
     def _int(name: str, default: int) -> int:
         try:
-            return int((payload or {}).get(name, default))
+            value = int((payload or {}).get(name, default))
+            # The UI uses -1 to mean "planner decides". Passing -1 into
+            # Python slicing silently means "all except the last entry" and
+            # made preflight draft evidence for a different CV than render.
+            return default if value < 0 else value
         except (TypeError, ValueError):
             return default
 
@@ -439,12 +443,14 @@ def render_preflight(payload: dict, db: Session = Depends(get_db)) -> dict:
     # buried in a project that never renders scored as evidenced, so no
     # draft was offered, and the scorecard then marked it missing. Same
     # renderer, same caps, same pins => the gaps here are the reds there.
+    from app.services.cv_section_planner import is_experience_led
+    _experience_led = is_experience_led(job)
     dry = render_cv(
         library_out,
         job=job,
-        max_selected_projects=_int("max_selected_projects", 3),
+        max_selected_projects=_int("max_selected_projects", 2 if _experience_led else 3),
         max_additional_projects=_int("max_additional_projects", 0),
-        max_experience=_int("max_experience", 2),
+        max_experience=_int("max_experience", 4 if _experience_led else 2),
         compile_pdf=False,
         use_llm_polish=False,
         pinned_project_titles=pinned,
@@ -1060,16 +1066,50 @@ def render_tailored_cv(
             "Carrying %d ephemeral evidence bullet(s) into every render pass", len(_ev_clean),
         )
 
+    # Resolve the section plan BEFORE polishing.  It lets us show the LLM only
+    # the entries that can actually reach the PDF instead of asking for a
+    # whole-master rewrite that can exceed the response-token ceiling.
+    _pinned_titles = list(payload.pinned_project_titles or [])
+    _pinned_rank = bool(getattr(payload, "pinned_rank", True))
+    _emit("plan", "Choosing which evidence to feature")
+    plan = plan_sections(
+        target_length=payload.target_length,
+        library=library_out,
+        job=job,
+        user_max_selected=payload.max_selected_projects,
+        user_max_additional=payload.max_additional_projects,
+        user_max_experience=payload.max_experience,
+    )
+
     used_llm = False
     llm_skip_reason = ""
 
-    # Career-ops style LLM polish — only when explicitly requested + the
-    # LLM layer is configured. Failure here is non-fatal; we fall back to
-    # the rule-based renderer with the original library.
+    # Career-ops style LLM polish — enabled by the API contract unless the
+    # caller explicitly opts out. Failure is non-fatal; we fall back to the
+    # rule-based renderer with the original library.
     if payload.use_llm:
         _emit("polish", "Tailoring bullets to the role")
+        focus_sections: dict[str, list[str]] | None = None
+        if job is not None:
+            preview = render_cv(
+                _with_ev(library_out),
+                job=job,
+                max_selected_projects=plan.max_selected_projects,
+                max_additional_projects=plan.max_additional_projects,
+                max_experience=plan.max_experience,
+                compile_pdf=False,
+                min_competency_rating=payload.min_competency_rating,
+                pinned_project_titles=_pinned_titles,
+                pinned_rank=_pinned_rank,
+                max_certifications=plan.max_certifications,
+                max_publications=plan.max_publications,
+            )
+            focus_sections = preview.sections_chosen
         polished, _bold_keywords, skip = polish_library_with_llm(
-            library_out, job, enhance=bool(getattr(payload, "enhance_tailor", False))
+            library_out,
+            job,
+            enhance=bool(getattr(payload, "enhance_tailor", True)),
+            focus_sections=focus_sections,
         )
         if polished is not None:
             library_out = polished
@@ -1087,24 +1127,6 @@ def render_tailored_cv(
         core_competencies_override = generate_competencies(
             library=library_out, job=job, want=8,
         )
-
-    # Manual per-job project pick. When present, render_cv restricts
-    # the projects section to these titles. _pinned_rank decides whether
-    # they're LLM-ranked within the pick (True) or forced in tick order
-    # (False).
-    _pinned_titles = list(payload.pinned_project_titles or [])
-    _pinned_rank = bool(getattr(payload, "pinned_rank", True))
-
-    # ---- Pick section caps. Page target + (optional) LLM decide.
-    _emit("plan", "Choosing which projects to feature")
-    plan = plan_sections(
-        target_length=payload.target_length,
-        library=library_out,
-        job=job,
-        user_max_selected=payload.max_selected_projects,
-        user_max_additional=payload.max_additional_projects,
-        user_max_experience=payload.max_experience,
-    )
 
     def _render_and_score(lib_in):
         """Render once and return (result, covered, missing, coverage)."""
@@ -1160,7 +1182,13 @@ def render_tailored_cv(
                 coverage=round(coverage, 2),
             )
             boosted_lib, log = boost_coverage(
-                library=library_out, job=job, missing_keywords=missing,
+                library=library_out,
+                job=job,
+                missing_keywords=missing,
+                allowed_entry_titles=(
+                    list(result.sections_chosen.get("projects") or [])
+                    + list(result.sections_chosen.get("experience") or [])
+                ),
             )
             coverage_boost_log.extend(log)
             iterations_done += 1

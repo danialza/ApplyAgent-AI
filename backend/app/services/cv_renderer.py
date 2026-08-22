@@ -31,6 +31,7 @@ from typing import Any, Iterable
 from jinja2 import Environment, StrictUndefined
 
 from app.models.schemas import CVLibraryOut, JobParsed
+from app.services.cv_section_planner import is_experience_led
 from app.services.synonyms import _GROUPS as _SYNONYM_GROUPS  # type: ignore  # noqa: PLC2701
 from app.services.synonyms import canonical, group_key
 
@@ -431,7 +432,24 @@ _LATEX_TEMPLATE = r"""
 \end{onecolentry}
 
 <% endif %>
-<% if education %>
+<% if experience_first and experience %>
+\section{Professional Experience \hrulefill}
+
+<% for x in experience %>
+\begin{onecolentry}
+\textbf{<< x.title | latex >>}<% if x.company %>, << x.company | latex >><% endif %> \hfill << x.period | latex >>
+<% if x.highlights %>
+\begin{highlights}
+<% for h in x.highlights %>
+    \item << h >>
+<% endfor %>
+\end{highlights}
+<% endif %>
+\end{onecolentry}
+
+<% endfor %>
+<% endif %>
+<% if education and not experience_first %>
 \section{Education \hrulefill}
 <% for e in education %>
 \begin{onecolentry}
@@ -448,9 +466,11 @@ _LATEX_TEMPLATE = r"""
 <% endfor %>
 <% endif %>
 <% if all_projects %>
+\needspace{10\baselineskip}
 \section{Selected Projects \hrulefill}
 
 <% for p in all_projects %>
+\needspace{8\baselineskip}
 \begin{onecolentry}
 <% if p.url %>\textbf{\href{<< p.url >>}{<< p.title | latex >>}}<% else %>\textbf{<< p.title | latex >>}<% endif %><% if p.period %> \hfill << p.period | latex >><% endif %>
 <% if p.highlights %>
@@ -464,7 +484,7 @@ _LATEX_TEMPLATE = r"""
 
 <% endfor %>
 <% endif %>
-<% if experience %>
+<% if experience and not experience_first %>
 \section{Professional Experience \hrulefill}
 
 <% for x in experience %>
@@ -473,6 +493,22 @@ _LATEX_TEMPLATE = r"""
 <% if x.highlights %>
 \begin{highlights}
 <% for h in x.highlights %>
+    \item << h >>
+<% endfor %>
+\end{highlights}
+<% endif %>
+\end{onecolentry}
+
+<% endfor %>
+<% endif %>
+<% if experience_first and education %>
+\section{Education \hrulefill}
+<% for e in education %>
+\begin{onecolentry}
+\textbf{<< e.degree | latex >>}, << e.institution | latex >> \hfill << e.period | latex >>
+<% if e.highlights %>
+\begin{highlights}
+<% for h in e.highlights %>
     \item << h >>
 <% endfor %>
 \end{highlights}
@@ -1068,6 +1104,7 @@ def render_cv(
         summary=render_bullet(library.summary) if library.summary else "",
         core_competencies=core_competencies,
         skills_groups=skills_groups_payload,
+        experience_first=is_experience_led(job),
         education=render_education(library.education),
         # Selected + additional are merged into one Projects section
         # (user preference). Selected ranked first so the strongest

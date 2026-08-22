@@ -8,8 +8,8 @@ never LLM-generated; only the textual content is.
 
 Hard guarantees:
   * LLM returns JSON only (Pydantic-validated).
-  * Number of bullets per section is preserved (no fabrication, no
-    silent truncation; if the LLM returns a wrong count we fall back).
+  * Strict mode preserves bullet counts; enhance mode allows bounded
+    expansion while project names and professional role titles stay fixed.
   * No new skill names appear in `bold_keywords` that aren't in the
     library's skills or the JD's required/preferred/technologies lists.
   * Any failure (no API key, network, schema violation) returns
@@ -66,7 +66,8 @@ _SYSTEM = (
     "(github.com/santifer/career-ops). Your job: tailor ONE CV to ONE "
     "job description, step by step. "
     "HARD RULES (non-negotiable): "
-    "(1) NEVER invent skills, employers, dates, numbers, or projects "
+    "(1) NEVER invent skills, employers, dates, numbers, projects, or "
+    "professional role titles "
     "the candidate doesn't already list in the library. "
     "(2) ONLY REFORMULATE existing claims using the JD's exact "
     "vocabulary. Reformulation = same meaning, JD wording. "
@@ -167,6 +168,16 @@ TAILOR THIS CV TO THIS JOB. Run the 7-step career-ops pipeline exactly:
            ML Research Engineer (publications + neural architectures +
            PyTorch + distributed training)
            MLOps Engineer (deployment + monitoring + pipelines + scale)
+           Site Reliability Engineer (reliability + observability + SLOs +
+           incident response + automation + toil reduction)
+           Platform Engineer (cloud + Kubernetes + Terraform + CI/CD +
+           reusable modules + developer enablement)
+           Cloud Infrastructure Engineer (AWS/Azure + infrastructure as code +
+           resilience + security controls)
+           Security / Identity Engineer (IAM + least privilege + secrets +
+           Zero Trust + policy enforcement)
+           Network Reliability Engineer (network architecture + segmentation +
+           automated validation + operational visibility)
            Robotics Software Engineer (ROS + perception + real-hardware
            + control)
            Backend AI Engineer (FastAPI + LLM APIs + vector DBs)
@@ -174,18 +185,15 @@ TAILOR THIS CV TO THIS JOB. Run the 7-step career-ops pipeline exactly:
            NLP Engineer (transformers + tokenisation + LLM training)
            Full-stack AI (frontend + backend + ML)
 
-           HARD: Open the Summary with the JD's EXACT job title string
-           (lowercase the leading article as grammar needs). JD says
-           "AI Engineer" → Summary starts "AI engineer with…"; JD says
-           "Senior Robot Learning Engineer" → "Senior robot learning
-           engineer…". Use the exact title whenever it honestly
-           describes the candidate; only fall back to the nearest
-           archetype noun when the exact title would be a false claim
-           (e.g. "Engineering Manager" for an IC). NEVER open with a
-           different generic archetype when the exact title fits —
-           recruiters and ATS rank the first line's title match above
-           everything else, and a mismatch is the #1 reason a CV is
-           skipped in the 7-second scan.
+           HARD: Open with the candidate's strongest TRUTHFUL professional
+           identity from the library. Use the JD's exact title only when it
+           already matches an existing professional role or an honestly
+           supported role family. Otherwise bridge without changing the
+           candidate's title, e.g. "Systems & Technical Lead with 7+ years
+           building reliable software and automation..." for a Principal
+           SRE posting. Put the target role's most important nouns in the
+           first two lines, but never present the target title as a job the
+           candidate already held.
   STEP 3 — Rewrite the Professional Summary in 3-4 lines, NO first-
            person pronouns. After the archetype opener, thread in the
            top 5 JD keywords by paraphrasing existing library claims.
@@ -247,8 +255,8 @@ CANDIDATE LIBRARY (JSON):
 #   * Lightly rewrite Professional Experience bullets to weave in JD
 #     terminology even when the original wording isn't a direct match.
 #
-# Trade-off: more JD coverage, more fabrication risk. User must opt
-# in via the request flag — default stays OFF.
+# Trade-off: more JD coverage, more estimation risk. Project names,
+# employers, dates, and professional role titles always remain immutable.
 _ENHANCE_SYSTEM = (
     "You are a senior CV editor in ENHANCE mode. Your job: aggressively "
     "tailor ONE CV to ONE job description, maximising keyword coverage "
@@ -257,8 +265,8 @@ _ENHANCE_SYSTEM = (
     "(1) You MAY add skills, tools, frameworks, and techniques that the "
     "candidate's projects plausibly imply — even if not explicitly listed "
     "in the library — provided they are reasonable inferences from the "
-    "project's stack or domain. Do NOT invent employers, dates, degrees, "
-    "or company names. "
+    "project's stack or domain. Do NOT invent or change employers, dates, "
+    "degrees, company names, project names, or professional role titles. "
     "(2) You MAY expand project bullets with additional detail anchored "
     "on the project's actual technology stack. You MAY also CHANGE the "
     "bullet count per project (add up to 2 new bullets, or trim weak "
@@ -313,11 +321,11 @@ _ENHANCE_SYSTEM = (
     "bullet with the facet of the work this JD values; reorder "
     "bullets so JD-relevant ones come first; adopt the JD's "
     "vocabulary for things the candidate genuinely did. FORBIDDEN: "
-    "changing the magnitude of a real number, inventing a metric not "
-    "in the library, or implying scale or seniority the evidence "
-    "does not support. If a number would have to change to impress "
-    "this employer, drop the number and lead with the qualitative "
-    "claim instead - never inflate it. This applies to IMPACT "
+    "changing the magnitude of an exact source number, fabricating an "
+    "ungrounded metric, or implying scale or seniority the evidence "
+    "does not support. If an exact number cannot be defended, either "
+    "lead with the qualitative claim or use the conservative estimate "
+    "policy in rule 13 - never inflate it. This applies to IMPACT "
     "metrics only, never to the years-of-experience claim, which "
     "is always stated truthfully and in digits. "
     "(12) " 
@@ -326,7 +334,14 @@ _ENHANCE_SYSTEM = (
     "Use a comma, a full stop, or restructure the sentence. "
     "Hyphens inside real compound terms (sim-to-real, multi-GPU) "
     "are fine. "
-    "(13) NEVER REFERENCE THE JOB POSTING OR EXPLAIN YOUR EDITS. Output "
+    "(13) METRICS IN ENHANCE MODE. You MAY add a conservative, defensible "
+    "estimate when a bullet needs scale and the library supplies a factual "
+    "basis (dates, workload, users, orders, requests, latency, or an existing "
+    "outcome). Prefix new estimates with '~' or use a range. You may derive "
+    "equivalent units (300/month -> ~3.6K/year). Never overwrite or inflate "
+    "an exact source metric, invent revenue/uptime/team size with no basis, "
+    "or use a number that contradicts the entry. "
+    "(14) NEVER REFERENCE THE JOB POSTING OR EXPLAIN YOUR EDITS. Output "
     "finished CV prose only. NEVER write 'the JD requires', \"mirroring "
     "the JD's requirements\", 'to match the role', 'as the job "
     "description asks', or any mention of 'the JD' / 'the job "
@@ -341,21 +356,29 @@ to maximise JD-fit. Run this pipeline:
 
   STEP 1 — Extract 20-25 canonical keywords from the JD (skills + tools
            + role terms + domain nouns). Use exact JD form.
-  STEP 2 — Open the rewritten Summary with the JD's EXACT job title
-           string (e.g. "AI Developer with…") whenever it honestly fits
-           the candidate; fall back to the nearest archetype noun only
-           when the exact title would be a false claim. The first line's
-           title match is what recruiters and ATS rank first.
-  STEP 3 — Rewrite the Professional Summary in 3-5 lines, no first-
-           person pronouns. Thread in top 7-8 JD keywords. End with
-           what the candidate ships / builds / improves.
+  STEP 2 — Open the rewritten Summary with the candidate's strongest
+           truthful professional identity. Use the JD's exact title only
+           when an existing role or the evidence genuinely supports it.
+           Otherwise bridge from the immutable source title and years,
+           e.g. "Systems & Technical Lead with 7+ years...". Put the target
+           role vocabulary in the first two lines without pretending the
+           candidate previously held that title.
+  STEP 3 — Rewrite the Professional Summary as exactly 3 concise sentences
+           (85-110 words), no first-person pronouns. Thread in the top 7-8
+           JD keywords and end with what the candidate ships / improves.
+           NEVER use transition/aspiration language such as "bridging into",
+           "transitioning to", "seeking", or "aspiring". It tells the
+           recruiter the candidate is not ready. State the supported
+           reliability/platform work directly without changing a held title.
   STEP 4 — For each project: reorder JD-relevant bullets to front,
            reword using JD vocab, AND add up to 2 new bullets that
            anchor on the project's actual stack but bring in JD
            terminology the original bullets missed. You may also trim
            weak bullets. Bullet count is FLEXIBLE per project.
+           Project title and period are immutable.
   STEP 5 — For each experience entry: reorder + lightly rewrite bullets
            to weave in JD vocab. Bullet count flexible (±1).
+           Professional title, company, and period are immutable.
   STEP 6 — extra_skills: propose skill groups to ADD to the rendered
            Skills section. Either new groups (label + items) or items
            to append to a group label that already exists in the
@@ -364,7 +387,10 @@ to maximise JD-fit. Run this pipeline:
   STEP 7 — bold_keywords: canonical skill/role nouns that appear in
            your rewritten text AND in the JD. The renderer wraps these
            in \\textbf{{}}.
-  STEP 8 — Self-check:
+  STEP 8 — Add quantified impact where it strengthens the JD match. Reuse
+           or derive from source numbers first. If a defensible estimate is
+           needed, mark it with '~' or a range and keep it conservative.
+  STEP 9 — Self-check:
              * No new employers/companies/degrees/dates introduced.
              * Output is a valid JSON object.
              * Title (and company) match library EXACTLY (case + spacing).
@@ -406,6 +432,30 @@ CANDIDATE LIBRARY (JSON):
 # ---------- Validators ----------
 
 _ALLOWED_LEN_RATIO = (0.4, 2.0)  # rewritten bullet must be within 40%-200% of original length
+
+_TRANSITION_INTO_RE = re.compile(
+    r"\bbridging\s+into\s+([^,.]+?)\s+through\s+practical\s+work\s+in\s+",
+    re.IGNORECASE,
+)
+
+
+def _prepare_summary(text: str) -> str:
+    """Keep the first-page pitch concise and remove self-disqualifiers."""
+    clean = re.sub(r"\s+", " ", (text or "").strip())
+    clean = _TRANSITION_INTO_RE.sub(r"applying \1 practices across ", clean)
+    clean = re.sub(
+        r"\b(?:transitioning|moving)\s+(?:into|to|towards?)\s+",
+        "focused on ",
+        clean,
+        flags=re.IGNORECASE,
+    )
+    clean = re.sub(r"\baspiring\s+(?:to\s+be\s+)?", "", clean, flags=re.IGNORECASE)
+    # LLMs often interpret "3-5 lines" as six long sentences. Three complete
+    # sentences stay readable in the top third and avoid a page-one text wall.
+    sentences = [
+        s.strip() for s in re.split(r"(?<=[.!?])\s+", clean) if s.strip()
+    ]
+    return " ".join(sentences[:3]).strip()
 
 
 def _bullets_compatible(original: list[str], rewritten: list[str]) -> bool:
@@ -472,6 +522,7 @@ def polish_library_with_llm(
     library: CVLibraryOut,
     job: JobParsed | None,
     enhance: bool = False,
+    focus_sections: dict[str, list[str]] | None = None,
 ) -> tuple[CVLibraryOut | None, list[str], str]:
     """Return (polished_library, bold_keywords, error_reason).
 
@@ -484,9 +535,13 @@ def polish_library_with_llm(
     if job is None:
         return None, [], "No JD provided"
 
-    # Build the prompt body. Library JSON is sent verbatim — small file,
-    # fits comfortably in any model's context.
-    library_json = library.model_dump_json(exclude={"id", "updated_at"})
+    # Send only entries that the section plan + ranker will actually render.
+    # The previous whole-library prompt asked the model to rewrite dozens of
+    # bullets, regularly hit the response-token ceiling, and returned a
+    # truncated/non-JSON answer.  Merge still targets the full library, so
+    # omitted entries remain untouched rather than being deleted.
+    prompt_library = _focused_library(library, focus_sections)
+    library_json = prompt_library.model_dump_json(exclude={"id", "updated_at"})
     sys_prompt = _ENHANCE_SYSTEM if enhance else _SYSTEM
     user_tpl = _ENHANCE_USER_TEMPLATE if enhance else _USER_TEMPLATE
     messages = [
@@ -519,7 +574,7 @@ def polish_library_with_llm(
     merged = library.model_copy(deep=True)
     if polished.summary.strip():
         from app.services.text_guard import clean_text_block, has_meta
-        new_summary = clean_text_block(polished.summary.strip())
+        new_summary = _prepare_summary(clean_text_block(polished.summary.strip()))
         # Use the scrubbed summary only when it survived; otherwise keep
         # the library's existing summary rather than ship meta-text.
         if new_summary and not has_meta(new_summary):
@@ -656,8 +711,54 @@ def _coerce_json(text: str) -> dict[str, Any] | None:
         try:
             return _ensure_dict(json.loads(fence.group(1)))
         except json.JSONDecodeError:
-            return None
+            pass
+    # Some providers prepend a short sentence despite JSON mode, or append a
+    # token-usage footer.  Decode the first complete JSON object rather than
+    # throwing away an otherwise valid polish response.
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", text):
+        try:
+            obj, _end = decoder.raw_decode(text[match.start():])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
     return None
+
+
+def _focused_library(
+    library: CVLibraryOut,
+    focus_sections: dict[str, list[str]] | None,
+) -> CVLibraryOut:
+    """Copy ``library`` and keep only entries selected for this render."""
+    if not focus_sections:
+        return library
+    focused = library.model_copy(deep=True)
+    project_titles = {
+        str(t).strip().lower()
+        for t in (focus_sections.get("projects") or [])
+        if str(t).strip()
+    }
+    experience_titles = {
+        str(t).strip().lower()
+        for t in (focus_sections.get("experience") or [])
+        if str(t).strip()
+    }
+    if project_titles:
+        focused.selected_projects = [
+            p for p in focused.selected_projects
+            if (p.title or "").strip().lower() in project_titles
+        ]
+        focused.additional_projects = [
+            p for p in focused.additional_projects
+            if (p.title or "").strip().lower() in project_titles
+        ]
+    if experience_titles:
+        focused.experience = [
+            x for x in focused.experience
+            if (x.title or "").strip().lower() in experience_titles
+        ]
+    return focused
 
 
 def _ensure_dict(obj: Any) -> dict[str, Any] | None:

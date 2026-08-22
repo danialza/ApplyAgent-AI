@@ -84,6 +84,34 @@ _GROUPS: list[tuple[str, tuple[str, ...]]] = [
          "force/torque sensing", "force-torque")),
     ("3D Perception",
         ("3d perception", "point cloud", "point clouds", "nerfs", "keypoints")),
+    # Reliability / platform vocabulary.  LLM JD extraction and the
+    # deterministic fallback use slightly different surface forms; these
+    # groups keep ranking, coverage, and bolding consistent across both.
+    ("Site Reliability Engineering",
+        ("site reliability engineering", "site reliability engineer", "sre")),
+    ("Platform Engineering",
+        ("platform engineering", "platform engineer")),
+    ("Infrastructure as Code",
+        ("infrastructure as code", "infrastructure-as-code", "iac")),
+    ("CI/CD",
+        ("ci/cd", "ci-cd", "continuous integration", "continuous delivery",
+         "continuous deployment")),
+    ("Observability",
+        ("observability", "telemetry", "operational visibility")),
+    ("Identity and Access Management",
+        ("identity and access management", "identity-based access", "iam")),
+    ("Microsoft Entra ID",
+        ("microsoft entra id", "entra id", "microsoft entra")),
+    ("HashiCorp Vault",
+        ("hashicorp vault", "vault")),
+    ("Zero Trust",
+        ("zero trust", "zero-trust")),
+    ("Incident Response",
+        ("incident response", "incident management", "time-to-recovery", "mttr")),
+    ("Distributed Systems",
+        ("distributed systems", "distributed system")),
+    ("Resilience Engineering",
+        ("resilience engineering", "resilience patterns", "reliability patterns")),
 ]
 
 

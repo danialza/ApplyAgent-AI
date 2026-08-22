@@ -82,7 +82,13 @@ def tailor_skills(jd_text: str, groups: list[SkillGroup]) -> list[SkillGroup] | 
         "Rename only if the JD's vocabulary is wildly different "
         "(rare).\n"
         "8. Generic groups (Domain Skills, Soft Skills) stay last "
-        "unless JD explicitly values them (communication-heavy roles)."
+        "unless JD explicitly values them (communication-heavy roles).\n"
+        "9. For senior/principal SRE, platform, infrastructure, cloud, "
+        "security, or network roles, return only 4-5 high-signal groups with "
+        "4-8 items each. Prioritise Reliability/SRE, Cloud/DevOps, "
+        "Security/Identity, and Languages. Put any AIOps item inside the SRE "
+        "group; do not keep a broad AI/ML wall or generic Domain Skills wall "
+        "unless a concrete JD requirement makes it indispensable."
     )
     user_payload = {
         "jd_excerpt": (jd_text or "")[:3000],

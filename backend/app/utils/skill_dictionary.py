@@ -98,6 +98,68 @@ ROBOTICS_SKILLS: dict[str, list[str]] = {
     "Embedded Systems": ["embedded systems", "embedded"],
 }
 
+# ---------- Site reliability / platform / security ----------
+
+# Keep these separate from the generic AI/cloud bucket.  SRE job descriptions
+# are usually written in operating-model language (reliability, guardrails,
+# toil, identity, controls), not just tool names.  Without these terms the
+# fallback parser reduced a Principal SRE posting to merely Python/AWS/Azure,
+# which then made every downstream ranker optimise for the wrong role.
+PLATFORM_SRE_SKILLS: dict[str, list[str]] = {
+    "Site Reliability Engineering": [
+        "site reliability engineering", "site reliability engineer", "sre",
+    ],
+    "Platform Engineering": ["platform engineering", "platform engineer"],
+    "Reliability Engineering": ["reliability engineering", "reliability patterns"],
+    "Infrastructure as Code": [
+        "infrastructure as code", "infrastructure-as-code", "iac",
+    ],
+    "CI/CD": [
+        "ci/cd", "ci-cd", "continuous integration", "continuous delivery",
+        "continuous deployment",
+    ],
+    "Terraform": ["terraform", "terraform modules"],
+    "Observability": ["observability", "operational visibility"],
+    "Monitoring": ["monitoring", "telemetry", "alerting"],
+    "Datadog": ["datadog"],
+    "Splunk": ["splunk"],
+    "AIOps": ["aiops", "ai-driven operations", "ai driven operations"],
+    "Automation": ["automation", "automation-first", "automated remediation"],
+    "Scripting": ["scripting", "automation scripting"],
+    "Incident Response": [
+        "incident response", "incident management", "time-to-recovery",
+        "time to recovery", "mttr",
+    ],
+    "Distributed Systems": ["distributed systems", "distributed system"],
+    "Resilience Engineering": ["resilience engineering", "resilience patterns"],
+    "High Availability": ["high availability", "availability"],
+    "Fault Tolerance": ["fault tolerance", "fault-tolerant", "failure modes"],
+    "Identity and Access Management": [
+        "identity and access management", "identity-based access", "iam",
+    ],
+    "Microsoft Entra ID": ["entra id", "microsoft entra"],
+    "HashiCorp Vault": ["hashicorp vault", "vault"],
+    "Secrets Management": [
+        "secrets management", "secret management", "short-lived credentials",
+        "short lived credentials",
+    ],
+    "Least Privilege": ["least privilege", "least-privilege"],
+    "Zero Trust": ["zero trust", "zero-trust"],
+    "Network Architecture": ["network architecture", "network architectures"],
+    "Network Segmentation": ["network segmentation", "segmentation"],
+    "Firewalls": ["firewall", "firewalls"],
+    "Security Engineering": ["security engineering", "secure-by-design"],
+    "Security Controls": ["security controls", "security control"],
+    "Compliance Automation": [
+        "compliance automation", "compliance requirements", "automated compliance",
+    ],
+    "Policy as Code": ["policy as code", "policy-as-code", "policy enforcement"],
+    "Event-driven Architecture": [
+        "event-driven", "event driven", "event-driven workflows",
+    ],
+    "Data Pipelines": ["data pipelines", "data pipeline", "data workflows"],
+}
+
 # ---------- Soft skills ----------
 
 SOFT_SKILLS: dict[str, list[str]] = {
@@ -123,7 +185,12 @@ SOFT_SKILLS: dict[str, list[str]] = {
 def all_technical_skills() -> dict[str, list[str]]:
     """Merged map of every technical category. Canonical → aliases."""
     merged: dict[str, list[str]] = {}
-    for source in (AI_ML_SKILLS, WEB_ECOMMERCE_SKILLS, ROBOTICS_SKILLS):
+    for source in (
+        AI_ML_SKILLS,
+        WEB_ECOMMERCE_SKILLS,
+        ROBOTICS_SKILLS,
+        PLATFORM_SRE_SKILLS,
+    ):
         for canonical, aliases in source.items():
             merged.setdefault(canonical, []).extend(aliases)
     return merged

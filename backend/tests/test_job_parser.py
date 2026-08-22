@@ -71,6 +71,34 @@ Requirements
 """
 
 
+SAMPLE_LINKEDIN_SRE_JD = """\
+Company logo for, Boston Consulting Group (BCG).
+Boston Consulting Group (BCG)
+
+Principal Site Reliability Engineer
+London, England, United Kingdom · Reposted 21 hours ago
+Hybrid
+Full-time
+
+About the job
+The Principal Site Reliability Engineer shapes reliability, automation,
+observability, incident response, and operational excellence.
+
+Required Qualifications
+- 10+ years in Site Reliability Engineering, Platform Engineering, or related fields.
+- Cloud platforms (AWS, Azure).
+- CI/CD and Infrastructure-as-Code using Terraform.
+- Observability tools including Datadog and Splunk.
+- Automation and scripting with Python.
+- Distributed systems, resilience patterns, and security controls.
+
+Preferred Qualifications
+- Identity and access management using Entra ID and Vault.
+- Network architecture, firewalls, segmentation, and Zero Trust.
+- Compliance automation and policy enforcement.
+"""
+
+
 def test_ai_jd_parses_metadata() -> None:
     p = parse_job_text(SAMPLE_AI_JD)
     assert p.job_title == "Senior AI Engineer"
@@ -134,6 +162,30 @@ def test_robotics_jd() -> None:
         assert s in skills, f"{s} not detected"
 
 
+def test_linkedin_sre_header_and_platform_vocabulary() -> None:
+    p = parse_job_text(SAMPLE_LINKEDIN_SRE_JD)
+    assert p.job_title == "Principal Site Reliability Engineer"
+    assert p.company == "Boston Consulting Group (BCG)"
+    assert p.experience_level == "principal"
+
+    required = set(p.required_skills)
+    for skill in (
+        "Site Reliability Engineering", "Platform Engineering", "AWS", "Azure",
+        "CI/CD", "Infrastructure as Code", "Terraform", "Observability",
+        "Datadog", "Splunk", "Automation", "Scripting", "Python",
+        "Distributed Systems", "Resilience Engineering", "Security Controls",
+    ):
+        assert skill in required, f"{skill} not detected as required"
+
+    preferred = set(p.preferred_skills)
+    for skill in (
+        "Identity and Access Management", "Microsoft Entra ID", "HashiCorp Vault",
+        "Network Architecture", "Firewalls", "Network Segmentation", "Zero Trust",
+        "Compliance Automation", "Policy as Code",
+    ):
+        assert skill in preferred, f"{skill} not detected as preferred"
+
+
 def test_empty_input_does_not_crash() -> None:
     p = parse_job_text("")
     assert p.job_title == "" and p.required_skills == []
@@ -148,6 +200,7 @@ def _run_all() -> None:
         test_ai_jd_soft_skills,
         test_wordpress_jd,
         test_robotics_jd,
+        test_linkedin_sre_header_and_platform_vocabulary,
         test_empty_input_does_not_crash,
     ]
     failed = 0

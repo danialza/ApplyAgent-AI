@@ -35,6 +35,7 @@ from app.models.schemas import (  # noqa: E402
     SkillGroup,
 )
 from app.services.cv_renderer import latex_escape, render_cv  # noqa: E402
+from app.services.cv_section_planner import plan_sections  # noqa: E402
 
 
 # ---------- Fixtures ----------
@@ -156,7 +157,7 @@ def test_render_unfiltered_master_cv() -> None:
     assert r"\section{Technical Skills" in tex
     assert r"\section{Education" in tex
     # Selected + additional merged into one "Projects" section.
-    assert r"\section{Projects" in tex
+    assert r"\section{Selected Projects" in tex
     assert r"\section{Professional Experience" in tex
     assert r"\section{Certifications" in tex
     assert r"\section{Publications" in tex
@@ -223,6 +224,63 @@ def test_render_does_not_double_bold() -> None:
     result = render_cv(lib, job=job)
     # No \textbf{\textbf{...}} sequence.
     assert r"\textbf{\textbf{" not in result.latex
+
+
+def test_experience_led_role_puts_work_history_before_projects() -> None:
+    """Principal SRE CVs must read senior, not project/education-led."""
+    lib = _sample_library()
+    job = JobParsed(
+        job_title="Principal Site Reliability Engineer",
+        required_skills=["Site Reliability Engineering", "Platform Engineering", "Python"],
+        technologies=["Python"],
+        raw_text="Principal SRE. Reliability, platform engineering, Python automation.",
+    )
+    result = render_cv(
+        lib,
+        job=job,
+        max_selected_projects=2,
+        max_additional_projects=0,
+        max_experience=2,
+    )
+    exp_pos = result.latex.find(r"\section{Professional Experience")
+    project_pos = result.latex.find(r"\section{Selected Projects")
+    education_pos = result.latex.find(r"\section{Education")
+    assert 0 < exp_pos < project_pos < education_pos
+    # Content may be rewritten, but identity-bearing titles remain verbatim.
+    assert "Senior Systems Developer" in result.latex
+    assert "AI Job-CV Matching Agent" in result.latex
+
+
+def test_auto_plan_curates_experience_led_roles() -> None:
+    lib = _sample_library()
+    job = JobParsed(job_title="Principal Site Reliability Engineer")
+    plan = plan_sections(
+        target_length="auto",
+        library=lib,
+        job=job,
+        user_max_selected=-1,
+        user_max_additional=-1,
+        user_max_experience=-1,
+    )
+    assert plan.max_selected_projects <= 2
+    assert plan.max_additional_projects == 0
+    assert plan.max_experience == len(lib.experience)
+    assert plan.max_publications == 0
+    assert "Experience-led" in plan.rationale
+
+
+def test_section_presets_do_not_leak_user_overrides() -> None:
+    lib = _sample_library()
+    first = plan_sections(
+        target_length="one_page", library=lib, job=None,
+        user_max_selected=0, user_max_additional=-1, user_max_experience=-1,
+    )
+    second = plan_sections(
+        target_length="one_page", library=lib, job=None,
+        user_max_selected=-1, user_max_additional=-1, user_max_experience=-1,
+    )
+    assert first.max_selected_projects == 0
+    assert second.max_selected_projects == 2
 
 
 # ---------- HTTP routes ----------
@@ -311,6 +369,9 @@ def _run_all() -> None:
         test_render_skill_groups_reorder_by_relevance,
         test_render_caps_respected,
         test_render_does_not_double_bold,
+        test_experience_led_role_puts_work_history_before_projects,
+        test_auto_plan_curates_experience_led_roles,
+        test_section_presets_do_not_leak_user_overrides,
         test_library_get_404_when_unset,
         test_library_put_then_get_then_render,
         test_render_404_when_library_unset,

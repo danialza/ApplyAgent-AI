@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from app.models.schemas import CVLibraryOut, JobParsed
@@ -88,6 +89,25 @@ _LLM_BOUNDS = {
 }
 
 
+_EXPERIENCE_LED_TITLE_RE = re.compile(
+    r"\b(?:site reliability|sre|platform engineer|devops|infrastructure|"
+    r"cloud engineer|cloud architect|network engineer|network architect|"
+    r"security engineer|security architect|systems engineer|systems developer|"
+    r"engineering manager|technical operations)\b",
+    re.IGNORECASE,
+)
+
+
+def is_experience_led(job: JobParsed | None) -> bool:
+    """Whether recruiters will expect work history before projects.
+
+    This deliberately keys off the parsed title, not incidental terms in the
+    body.  An AI role may mention "platform" once; a Principal SRE title is
+    unambiguously an experience-led operating role.
+    """
+    return bool(job and _EXPERIENCE_LED_TITLE_RE.search(job.job_title or ""))
+
+
 def plan_sections(
     *,
     target_length: TargetLength,
@@ -105,7 +125,9 @@ def plan_sections(
     # Start from the preset. ``auto`` falls back to ``two_page`` when
     # the LLM is unavailable.
     if target_length in _PRESETS:
-        base = _PRESETS[target_length]
+        # Presets are module constants.  Always copy before clamping or a
+        # user override from one request leaks into every later render.
+        base = replace(_PRESETS[target_length])
     else:
         # "auto" path — or any unknown future literal — defers to LLM
         # and falls back to two_page when LLM unreachable.
@@ -114,6 +136,23 @@ def plan_sections(
                if k != "rationale" and k != "source"},
             source="llm_fallback",
             rationale="LLM unavailable; using two-page preset.",
+        )
+
+    # Principal SRE/platform/infrastructure hiring is evidence-led: work
+    # history and operating impact matter far more than an academic/project
+    # catalogue.  The previous generic "principal => 5/3 projects" heuristic
+    # produced eight projects before two experience entries, which read as an
+    # early-career AI CV.  Apply this only in auto mode; explicit page presets
+    # and field overrides remain user-controlled.
+    if target_length == "auto" and is_experience_led(job):
+        base.max_selected_projects = min(base.max_selected_projects, 2)
+        base.max_additional_projects = 0
+        base.max_experience = max(base.max_experience, 4)
+        base.max_certifications = min(base.max_certifications, 3)
+        base.max_publications = 0
+        base.rationale = (
+            "Experience-led role: work history first, at most two supporting "
+            "projects, and academic/research noise removed."
         )
 
     # Clamp against the candidate's actual library so we never claim
@@ -171,6 +210,11 @@ def _llm_plan(library: CVLibraryOut, job: JobParsed | None) -> SectionPlan | Non
         "Heuristics: junior / first-job → fewer (2/1/2). Mid → 3/2/3. "
         "Senior / staff / principal → 5/3/4. Research / academic JDs that "
         "value publications → trim experience to 3, keep additional at 2.\n"
+        "Exception: SRE, platform, infrastructure, cloud, security, network, "
+        "and technical-operations roles are EXPERIENCE-LED. For these choose "
+        "1-2 selected projects, 0 additional projects, as much relevant work "
+        "history as exists, and 0 publications. Do not apply the generic "
+        "principal-project expansion to an experience-led role.\n"
         "Signal curation: for senior/staff roles keep only heavyweight "
         "certifications (max_certifications 3-4) — intro-level courses "
         "read as noise and invite rejection. For non-research roles cap "

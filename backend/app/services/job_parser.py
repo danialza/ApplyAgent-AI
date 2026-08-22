@@ -69,6 +69,10 @@ _COMPANY_HINT_RE = re.compile(
     r"^(?:company|employer|organization|organisation)\s*[:\-]\s*(.+)$",
     re.IGNORECASE | re.MULTILINE,
 )
+_COMPANY_LOGO_RE = re.compile(
+    r"^company\s+logo\s+for,?\s*(.+?)\.?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 _LOCATION_HINT_RE = re.compile(
     r"^(?:location|based in|office|city)\s*[:\-]\s*(.+)$",
     re.IGNORECASE | re.MULTILINE,
@@ -133,6 +137,28 @@ _EDU_KEYWORDS = [
     "phd", "ph.d", "doctorate",
     "diploma", "associate",
 ]
+
+# LinkedIn paste starts with a logo alt-text line and the company name before
+# the actual role title.  A "first short line wins" heuristic therefore
+# reports the employer as the job title.  Score role-shaped lines instead and
+# explicitly reject the common chrome/navigation strings.
+_ROLE_TITLE_RE = re.compile(
+    r"\b(?:engineer|developer|architect|manager|scientist|analyst|"
+    r"specialist|consultant|administrator|director|designer|researcher|"
+    r"officer|technician)\b",
+    re.IGNORECASE,
+)
+_TITLE_SENIORITY_RE = re.compile(
+    r"\b(?:principal|staff|senior|lead|head|chief|junior|graduate)\b",
+    re.IGNORECASE,
+)
+_TITLE_NOISE_RE = re.compile(
+    r"^(?:company logo for,|about the job|who we are|what you(?:'|’)ll do|"
+    r"apply|save|full[ -]?time|part[ -]?time|hybrid|remote|on[ -]?site|"
+    r"people you can reach out to|show all|show match details|"
+    r"get personalized tips|promoted by|responses managed)",
+    re.IGNORECASE,
+)
 
 
 # ---------- Result type ----------
@@ -269,19 +295,70 @@ def _detect_salary(text: str) -> str:
 
 
 def _detect_title(text: str) -> str:
-    """Prefer 'Job Title:' line, else first short non-sentence line."""
+    """Prefer a labelled title, else the strongest role-shaped header.
+
+    The first ~30 lines cover LinkedIn's header while avoiding role nouns in
+    the long description ("mentor engineers", "technical manager", etc.).
+    """
     labelled = _first_match(_TITLE_HINT_RE, text)
     if labelled:
         return labelled
-    for ln in text.split("\n"):
+
+    candidates: list[tuple[int, int, str]] = []
+    fallback: list[str] = []
+    for idx, ln in enumerate(text.split("\n")[:30]):
         s = ln.strip()
         if not s:
             continue
+        if _normalize_header_line(s) == "about the job":
+            break
         if 3 <= len(s) <= 80 and not s.endswith(".") and not s.endswith(":"):
             # Avoid matching contact/location lines that often start the doc.
-            if any(c in s for c in "@/"):
+            if any(c in s for c in "@/") or _TITLE_NOISE_RE.search(s):
                 continue
-            return s
+            fallback.append(s)
+            score = 0
+            if _ROLE_TITLE_RE.search(s):
+                score += 10
+            if _TITLE_SENIORITY_RE.search(s):
+                score += 2
+            # A separator-heavy LinkedIn metadata row is not a title.
+            if " · " in s or " clicked " in s.lower():
+                score -= 8
+            if score > 0:
+                candidates.append((score, -idx, s))
+    if candidates:
+        return max(candidates)[2]
+    return fallback[0] if fallback else ""
+
+
+def _detect_company(text: str, job_title: str = "") -> str:
+    """Extract an explicitly labelled or LinkedIn logo-alt employer."""
+    labelled = _first_match(_COMPANY_HINT_RE, text)
+    if labelled:
+        return labelled
+    logo = _first_match(_COMPANY_LOGO_RE, text)
+    if logo:
+        return logo.rstrip(" .")
+
+    # Conservative LinkedIn fallback: the non-noise line immediately before
+    # the detected role title is normally the company name.  Do not guess from
+    # the body when the header topology is absent.
+    if job_title:
+        lines = [ln.strip() for ln in text.split("\n")[:30] if ln.strip()]
+        try:
+            pos = next(i for i, ln in enumerate(lines) if ln == job_title)
+        except StopIteration:
+            pos = -1
+        if pos > 0:
+            candidate = lines[pos - 1].rstrip(" .")
+            if (
+                candidate
+                and not _TITLE_NOISE_RE.search(candidate)
+                and not _ROLE_TITLE_RE.search(candidate)
+                and len(candidate) <= 100
+            ):
+                return candidate
     return ""
 
 
@@ -310,7 +387,7 @@ def parse_job_text(text: str) -> ParsedJob:
 
     # --- 1. Inline metadata
     parsed.job_title = _detect_title(cleaned)
-    parsed.company = _first_match(_COMPANY_HINT_RE, cleaned)
+    parsed.company = _detect_company(cleaned, parsed.job_title)
     parsed.location = _first_match(_LOCATION_HINT_RE, cleaned)
     parsed.salary = _detect_salary(cleaned)
     parsed.employment_type = _detect_employment_type(cleaned)

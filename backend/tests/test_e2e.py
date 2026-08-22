@@ -231,11 +231,11 @@ def test_full_workflow_walkthrough() -> None:
         for s in ("Python", "Machine Learning", "RAG", "FAISS"):
             assert s in parsed["required_skills"]
 
-        # ===== 5. Match (text) — needs CVs in /cvs, but we only have a
-        # profile. Confirm the endpoint correctly 404s when no CVs and
-        # gracefully reports the state. =====
+        # ===== 5. Match (text) — unified-candidate matching uses the
+        # profile when there are no individually uploaded CV rows. =====
         resp = client.post("/api/match", json={"job_text": JD_AI})
-        assert resp.status_code == 404
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["results"], "profile-backed match should return a result"
 
         # ===== 6. Rank with profile fallback =====
         resp = client.post(
@@ -279,8 +279,8 @@ def test_full_workflow_walkthrough() -> None:
             "/api/match/from-url",
             json={"url": "https://example.com/jobs/123"},
         )
-        # Endpoint requires real CVs — confirm consistent 404 message.
-        assert resp.status_code == 404
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["results"], "profile-backed URL match should return a result"
 
         # /api/jobs/from-url should still work (no CVs needed).
         resp = client.post(
@@ -302,12 +302,13 @@ def test_full_workflow_walkthrough() -> None:
         assert body["success"] is True
         assert body["parsed_job"]["company"] == "Cortex Labs"
 
-        # ===== 11. CSV batch — needs CVs; expect 404. =====
+        # ===== 11. CSV batch — unified profile is a valid candidate. =====
         resp = client.post(
             "/api/match/batch-csv",
             files={"file": ("jobs.csv", io.BytesIO(CSV_BYTES), "text/csv")},
         )
-        assert resp.status_code == 404
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["rows_processed"] == 2
 
         # ===== 12. Discover jobs (mocked) =====
         resp = client.post(

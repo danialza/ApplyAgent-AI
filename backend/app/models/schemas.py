@@ -532,9 +532,10 @@ class RenderCVRequest(BaseModel):
     max_experience: int = Field(default=-1, ge=-1, le=20)
     # Career-ops style LLM polish: rewrite Summary + reformulate bullets
     # using JD vocabulary, then plug the polished content through the
-    # same template. Falls back to the rule-based path on any failure.
-    # Requires USE_LLM_EXTRACTION=true + OPENAI_API_KEY.
-    use_llm: bool = False
+    # same template. This is the service default and falls back to the
+    # rule-based path on any failure. Requires USE_LLM_EXTRACTION=true +
+    # OPENAI_API_KEY for the polish itself.
+    use_llm: bool = True
     # Minimum self-rating (1..5) for items in `core_competencies`.
     # Default 1 = treat every stretch skill as fair game (user
     # decision: "assume best on all"). The dropdown was removed from
@@ -546,13 +547,14 @@ class RenderCVRequest(BaseModel):
     # `max_boost_iterations` times. Set target=0 to disable.
     target_keyword_coverage: float = Field(default=0.80, ge=0.0, le=1.0)
     max_boost_iterations: int = Field(default=3, ge=0, le=5)
-    # Enhance mode — when on, polish layer is allowed to stretch:
+    # Enhance mode — the default tailoring contract for this service. The
+    # polish layer is allowed to stretch:
     # add JD-relevant skills not already in the library, expand
     # project descriptions with plausible details, and lightly rewrite
     # Professional Experience bullets even when the JD wording isn't
-    # in the original library. Default OFF to preserve career-ops
-    # "never invent" guarantee.
-    enhance_tailor: bool = False
+    # in the original library. This is ON by default; immutable project,
+    # employer, role-title, and date fields remain code-enforced.
+    enhance_tailor: bool = True
     # Manual project pick. When non-empty, restricts the projects
     # section to these titles. Empty list = automatic selection.
     pinned_project_titles: list[str] = Field(default_factory=list)

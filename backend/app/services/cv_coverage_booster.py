@@ -57,6 +57,7 @@ def boost_coverage(
     library: CVLibraryOut,
     job: JobParsed,
     missing_keywords: list[str],
+    allowed_entry_titles: list[str] | None = None,
 ) -> tuple[CVLibraryOut, list[str]]:
     """Return a deep-copied library with bullets nudged to cover more
     of `missing_keywords`. Also returns a per-edit log so the caller
@@ -74,7 +75,7 @@ def boost_coverage(
 
     keywords = missing_keywords[:MAX_KEYWORDS_PER_CALL]
 
-    bullets_snapshot = _bullet_snapshot(library)
+    bullets_snapshot = _bullet_snapshot(library, allowed_entry_titles)
     if not bullets_snapshot:
         return library, ["coverage_boost_skipped: library has no bullets to edit"]
 
@@ -92,6 +93,10 @@ def boost_coverage(
         "force it. Better to leave coverage at 70% than invent.\n"
         f"4. Touch at most {MAX_BULLETS_TOUCHED_PER_CALL} bullets in total.\n"
         "5. Keep each rewritten bullet under 200 characters and one line.\n"
+        "5a. Write natural CV prose. NEVER invent '-style', '-inspired', "
+        "'-aware', or '-friendly' constructions (for example, never write "
+        "'distributed systems-style' or 'Datadog-style'). Name a standard or "
+        "tool directly only when the rewrite is consistent with the entry.\n"
         "5b. NEVER reference the job posting or explain the edit. The new "
         "text is finished CV prose — never write 'the JD requires', "
         "\"mirroring the JD's requirements\", 'to match the role', or any "
@@ -181,12 +186,22 @@ def _flat_skills(library: CVLibraryOut) -> list[str]:
     return out
 
 
-def _bullet_snapshot(library: CVLibraryOut) -> list[dict]:
+def _bullet_snapshot(
+    library: CVLibraryOut,
+    allowed_entry_titles: list[str] | None = None,
+) -> list[dict]:
     """Compact view: every editable bullet keyed by section/index so
     the LLM can return a stable pointer back to the one it wants to
     rewrite."""
     out: list[dict] = []
+    allowed = {
+        (t or "").strip().lower()
+        for t in (allowed_entry_titles or [])
+        if (t or "").strip()
+    }
     for i, p in enumerate(library.selected_projects or []):
+        if allowed and (p.title or "").strip().lower() not in allowed:
+            continue
         for b, text in enumerate(p.highlights or []):
             out.append({
                 "section": "selected_projects",
@@ -196,6 +211,8 @@ def _bullet_snapshot(library: CVLibraryOut) -> list[dict]:
                 "text": text,
             })
     for i, p in enumerate(library.additional_projects or []):
+        if allowed and (p.title or "").strip().lower() not in allowed:
+            continue
         for b, text in enumerate(p.highlights or []):
             out.append({
                 "section": "additional_projects",
@@ -205,6 +222,8 @@ def _bullet_snapshot(library: CVLibraryOut) -> list[dict]:
                 "text": text,
             })
     for i, x in enumerate(library.experience or []):
+        if allowed and (x.title or "").strip().lower() not in allowed:
+            continue
         for b, text in enumerate(x.highlights or []):
             out.append({
                 "section": "experience",

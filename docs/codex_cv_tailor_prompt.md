@@ -12,6 +12,12 @@ adapted to **Danial's specific LaTeX template** (`charter` font,
 `geometry` 1 cm margins, `\section{… \hrulefill}` headers, `highlights` /
 `onecolentry` environments).
 
+> This is the conservative, standalone prompt. The live service defaults to
+> **Aggressive tailor**, which permits plausible adjacent skills and clearly
+> marked conservative estimates while still locking project names, employer
+> names, professional role titles, dates, degrees, and institutions. Use
+> `enhance_tailor=false` to request the conservative behaviour documented here.
+
 ---
 
 ## SYSTEM (instructions to the model)

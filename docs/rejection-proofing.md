@@ -31,15 +31,20 @@ skills at 40 points versus 10 for merely naming them.
 
 ## JD steering — what the tailor may and may not do
 
-The polish layer is explicitly allowed to angle real facts at the JD:
-choose *which* true metric to surface, restate a true number in the
-employer's unit (`300/month` → `~3.6K/year`), lead with the facet the JD
-values, reorder bullets, adopt the JD's vocabulary.
+The default contract is **Aggressive tailor** (`enhance_tailor=true`). It
+may add plausible adjacent skills and implementation details, expand thin
+bullets, adopt the JD's vocabulary, and add conservative estimates when a
+number makes the result more useful. Estimated values must be visibly
+marked with `~` or a range. An exact metric already present in the source
+must not be replaced with a different value.
 
-It is explicitly forbidden from changing the magnitude of a real number,
-inventing a metric, or implying scale/seniority the evidence doesn't
-support. If a number would have to change to impress an employer, the
-instruction is to drop the number and lead with the qualitative claim.
+Project names, employer names, professional role titles, dates, degrees,
+and institutions are immutable in both modes. The polish layer must not
+manufacture a different career identity, employer, promotion, or timeline.
+
+Set `enhance_tailor=false` for the conservative path. That mode only
+reframes and reorders facts already supported by the Master CV; it does not
+add skills or metrics.
 
 ## Running it
 

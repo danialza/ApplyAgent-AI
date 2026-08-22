@@ -58,7 +58,10 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
   // disabled server-side, the render still succeeds (rule-based fallback)
   // and llm_skip_reason explains the gap in the error banner.
   const [useLlm, setUseLlm] = useState(true);
-  const [enhanceTailor, setEnhanceTailor] = useState(false);
+  // This service is intentionally an aggressive CV tailor: it may add
+  // defensible adjacent skills/details and conservative estimates while the
+  // backend keeps project names and professional role titles immutable.
+  const [enhanceTailor, setEnhanceTailor] = useState(true);
   // Manual per-job project pick. Empty set = automatic ranking.
   const [pinnedTitles, setPinnedTitles] = useState<string[]>([]);
   // true = LLM ranks + trims within the pick; false = force all picks.
@@ -806,7 +809,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
           className={`flex items-center gap-2 text-xs font-medium ${
             enhanceTailor ? "text-amber-700" : "text-slate-600"
           }`}
-          title="ENHANCE mode — lets the LLM add JD-relevant skills the library doesn't list, expand project bullets, and rewrite experience bullets more freely. Trade-off: higher JD-fit, higher fabrication risk. Off by default. Requires Polish with LLM."
+          title="Aggressive tailoring adds JD-relevant adjacent skills, expands evidence, and may use conservative '~' estimates. Project names, employers, dates, and your professional role titles remain fixed."
         >
           <input
             type="checkbox"
@@ -815,7 +818,7 @@ export default function TailoredCVPanel({ onError, onApplicationTracked }: Props
             onChange={(e) => setEnhanceTailor(e.target.checked)}
             className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
           />
-          Enhance tailor ⚠
+          Aggressive tailor
         </label>
         <label
           className="flex items-center gap-2 text-xs font-medium text-slate-600"

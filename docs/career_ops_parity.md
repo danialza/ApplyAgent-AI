@@ -27,7 +27,7 @@ Career-ops's tailored-CV pipeline (from `modes/pdf.md` and
 | 8 | Select top 3-4 most relevant projects | ✅ Rule-based ranking by tag-overlap + `max_selected_projects` knob (default 4) |
 | 9 | Reorder experience bullets by JD relevance | ✅ LLM prompt Step 5 (keeps bullet count, reorders + rewords) |
 | 10 | Build competency grid (6-8 keyword phrases from JD) | ✅ Renderer computes `core_competencies` = up to 8 JD canonical terms ∩ candidate's skill set, emits `\section{Core Competencies \hrulefill}` |
-| 11 | Inject keywords naturally; **never invent skills** | ✅ Hard rule in system prompt + bullet-count + bullet-length guards in `codex_cv_polish._bullets_compatible` + `_scrub_bold_keywords` |
+| 11 | Inject keywords naturally; conservative mode never invents skills | ✅ `enhance_tailor=false` keeps the strict grounding rule; the default aggressive mode may add plausible adjacent skills while identity fields remain immutable |
 | 12 | Generate LaTeX from template + personalised content | ✅ `cv_renderer.render_cv` Jinja2 template |
 | 13 | Filename: `cv-{candidate}-{company}-{YYYY-MM-DD}` | ✅ `RenderCVResponse.suggested_filename` |
 | 14 | Compile to PDF via `tectonic` | ✅ Backend image bakes in tectonic; `compile_pdf=true` returns base64 PDF |
@@ -56,12 +56,14 @@ polish when `use_llm: true`:
 | "MLOps" | "observability, evals, error handling" | "MLOps and observability: evals, error handling, cost monitoring" |
 | "stakeholder management" | "collaborated with team" | "stakeholder management across engineering, operations, and business" |
 
-Hard rule (same as career-ops): **never add a skill the candidate
-doesn't have.** Only reformulate existing experience with the JD's
-vocabulary. Enforced by `_scrub_bold_keywords` (drops any bold keyword
-not present in the library or the JD) and `_bullets_compatible`
-(rejects a polish where bullet count or per-bullet length drifts beyond
-0.4×–2.0× of the original).
+With `enhance_tailor=false`, the hard rule is the same as career-ops:
+**never add a skill the candidate doesn't have.** That path only
+reformulates existing experience with the JD's vocabulary. The default
+aggressive mode may add plausible adjacent skills, implementation details,
+and clearly marked conservative estimates, but project names, employer
+names, professional role titles, dates, degrees, and institutions remain
+immutable. `_bullets_compatible` still limits structural drift and the
+merge layer only applies rewrites to entries with matching source identity.
 
 ## What we DON'T do (career-ops's broader scope)
 
