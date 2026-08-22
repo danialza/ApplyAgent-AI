@@ -170,17 +170,16 @@ batch-logs: ## Tail the batch stack logs.
 batch-clean: ## Stop the batch stack + remove ONLY its own caches (never the shared DB).
 	$(COMPOSE_UNSET) $(BATCH_COMPOSE) down -v
 
-# ---- Rejection-proof stack (validation, ports 3300 / 8300) ----
-# Isolated validation stack for the recruiter-scorecard work. Has its
-# OWN database (seeded from a copy of the live one) because the metrics
-# harvester writes to the master CV — the 3000/3100/3200 stacks are
-# never touched.
+# ---- Rejection-proof stack (live data, ports 3300 / 8300) ----
+# Runs the branch's recruiter-scorecard/tailoring code against the SAME
+# external database as the day-to-day stacks, so Master CV and Applications
+# changes are immediately visible everywhere.
 
 RP_COMPOSE := docker compose -f docker-compose.rp.yml $(COMPOSE_ENV_FILES)
 
 .PHONY: rp-seed
-rp-seed: ## Copy the live DB into the rejection-proof stack's own volume.
-	@bash scripts/rp-seed.sh
+rp-seed: ## Obsolete: the rejection-proof stack now uses the live DB directly.
+	@echo "No seed needed: 3300/8300 already shares applyagentai_backend_data."
 
 .PHONY: rp-up
 rp-up: ## Build + start the rejection-proof stack (3300 / 8300).
@@ -198,13 +197,12 @@ rp-logs: ## Tail the rejection-proof stack logs.
 	$(COMPOSE_UNSET) $(RP_COMPOSE) logs -f --tail=100
 
 .PHONY: rp-clean
-rp-clean: ## Stop it and delete ONLY its isolated volumes.
+rp-clean: ## Stop it and delete only its cache; the external live DB is preserved.
 	$(COMPOSE_UNSET) $(RP_COMPOSE) down -v
 
 # ---- Rejection-proof stack on LIVE data (ports 3400 / 8400) ----
-# Same code as the 3300 validation stack, but pointed at the REAL
-# database, so tracked applications and harvested metrics land in the
-# master CV / tracker you actually use. Runs alongside 3000.
+# Legacy second rejection-proof endpoint. It shares the same live database as
+# 3300/8300 and remains available on 3400/8400 for side-by-side comparison.
 
 RP2_COMPOSE := docker compose -f docker-compose.rp-live.yml $(COMPOSE_ENV_FILES)
 

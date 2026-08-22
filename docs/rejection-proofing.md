@@ -2,9 +2,9 @@
 
 Nine upgrades aimed at the two gates that actually reject applications —
 the ATS/keyword gate and the human 7-second scan. Validated on the
-isolated stack at **3300 / 8300** (`make rp-up`), which has its own
-database so the metrics harvester can never write to the master CV you
-use daily.
+parallel stack at **3300 / 8300** (`make rp-up`). It uses the same external
+database as the day-to-day stacks, so Master CV and Applications changes are
+visible everywhere; only its containers, ports, and model cache are separate.
 
 ## What each one does
 
@@ -49,7 +49,7 @@ add skills or metrics.
 ## Running it
 
 ```bash
-make rp-seed   # copy the live DB into this stack's own volume
+make rp-seed   # obsolete/no-op: the live database is already shared
 make rp-up     # build + start on 3300 / 8300
 ```
 
