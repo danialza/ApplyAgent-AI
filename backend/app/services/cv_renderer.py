@@ -890,6 +890,12 @@ def render_cv(
             t = strip_dashes(t)
         return t
 
+    def render_plain(text: str) -> str:
+        """Any short field that is not a bullet or a title: swept for
+        stray glyphs and em/en dashes like everything else on the page."""
+        from app.services.text_guard import strip_dashes, strip_stray
+        return strip_dashes(strip_stray((text or "").strip()))
+
     def render_period(text: str) -> str:
         """Date ranges use a plain hyphen: no en dashes anywhere."""
         import re as _re
@@ -981,12 +987,15 @@ def render_cv(
     def render_certifications(entries):
         out = []
         for c in entries:
-            issuer = latex_escape(c.issuer).strip()
+            issuer = latex_escape(render_plain(c.issuer)).strip()
             # Career-ops convention: bold the credential NAME, leave
             # issuer plain. Recruiters search for cert names
             # ("Azure AI Fundamentals", "Deep Learning Specialisation"),
             # not the issuing org.
-            name_raw = latex_escape(c.name).strip()
+            # Certification names carry dashes as often as titles do
+            # ("CS50P - Introduction to Programming"), and they were the
+            # one path that never went through the sweep.
+            name_raw = latex_escape(render_title(c.name)).strip()
             name_bold = rf"\textbf{{{name_raw}}}"
             line = (issuer + ": " + name_bold) if issuer else name_bold
             out.append({"line": line})
@@ -997,8 +1006,10 @@ def render_cv(
         for p in entries:
             status = latex_escape(p.status).strip()
             title_render = render_bullet(p.title)
-            venue = latex_escape(p.venue).strip()
-            tail = " — " + venue if venue else ""
+            venue = latex_escape(render_plain(p.venue)).strip()
+            # Was a hard-coded em dash: the renderer sweeps every field
+            # for dashes and then reintroduced one itself.
+            tail = ", " + venue if venue else ""
             line = (rf"\textbf{{{status}:}} " + title_render + tail) if status else (title_render + tail)
             out.append({"line": line})
         return out

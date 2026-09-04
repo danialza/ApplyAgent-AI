@@ -165,7 +165,13 @@ def clean_text_block(text: str) -> str:
 # not want them in CV or letter prose. Hyphens inside real compound
 # terms (sim-to-real, multi-GPU, FastAPI-based) are untouched — only the
 # free-standing em/en dash used as punctuation is rewritten.
-_DASH_SPACED = re.compile(r"\s*[\u2014\u2013]\s*")     # — or – with any spacing
+# A dash with no space around it is doing the work of a hyphen inside a
+# compound term: Euler-Lagrange, Vision-Language, sim-to-real. Turning
+# those into commas mangles the term ("Euler, Lagrange Systems"), so
+# they become hyphens and only the free-standing punctuation dash is
+# rewritten as prose.
+_DASH_TIGHT = re.compile(r"(?<=[A-Za-z0-9])[\u2014\u2013](?=[A-Za-z0-9])")
+_DASH_SPACED = re.compile(r"\s*[\u2014\u2013]\s*")     # em/en dash with any spacing
 _DOUBLE_PUNCT = re.compile(r",\s*([,.;:])")
 _SPACE_BEFORE_PUNCT = re.compile(r"\s+([,.;:])")
 
@@ -181,7 +187,8 @@ def strip_dashes(text: str) -> str:
         return text
     if "\u2014" not in text and "\u2013" not in text:
         return text
-    out = _DASH_SPACED.sub(", ", text)
+    out = _DASH_TIGHT.sub("-", text)
+    out = _DASH_SPACED.sub(", ", out)
     out = _DOUBLE_PUNCT.sub(r"\1", out)          # ", ." -> "."
     out = _SPACE_BEFORE_PUNCT.sub(r"\1", out)    # " ," -> ","
     out = re.sub(r",\s*$", "", out.strip())      # trailing comma
