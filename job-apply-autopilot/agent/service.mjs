@@ -99,6 +99,16 @@ function coverageTarget(value) {
   return Math.max(0, Math.min(parsed, 1));
 }
 
+function stringList(value) {
+  try {
+    const parsed = Array.isArray(value) ? value : JSON.parse(String(value || '[]'));
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.map((item) => String(item || '').trim()).filter(Boolean))].slice(0, 50);
+  } catch {
+    return [];
+  }
+}
+
 const normalise = (value) => String(value || '')
   .toLowerCase()
   .replace(/[^a-z0-9]+/g, '_')
@@ -243,6 +253,8 @@ async function renderCv(runId, jdText, settings) {
       enhance_tailor: enhanceTailor,
       target_length: settings.cv_length || 'auto',
       target_keyword_coverage: coverageTarget(settings.cv_coverage_target),
+      pinned_project_titles: stringList(settings.cv_pinned_projects),
+      pinned_rank: parseBoolean(settings.cv_pinned_rank),
       progress_id: progressId,
     }),
   }, 1_200_000);
@@ -627,11 +639,16 @@ export async function cvOptions() {
   const now = Date.now();
   if (cvOptionsCache && now - cvOptionsCache.at < 60_000) return cvOptionsCache.value;
   const base = getSettings().cv_api_base.replace(/\/$/, '');
-  const [models, status] = await Promise.all([
+  const [models, status, library] = await Promise.all([
     requestJson(`${base}/api/cv/llm-models`, {}, 20_000),
     requestJson(`${base}/api/cv/llm-status`, {}, 30_000),
+    requestJson(`${base}/api/cv/library`, {}, 20_000),
   ]);
-  const value = { models, status };
+  const projects = [
+    ...(library.selected_projects || []).map((project) => ({ title: String(project.title || ''), group: 'selected' })),
+    ...(library.additional_projects || []).map((project) => ({ title: String(project.title || ''), group: 'additional' })),
+  ].filter((project) => project.title.trim());
+  const value = { models, status, projects };
   cvOptionsCache = { at: now, value };
   return value;
 }

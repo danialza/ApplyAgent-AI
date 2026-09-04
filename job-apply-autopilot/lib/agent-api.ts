@@ -61,6 +61,8 @@ export interface AgentSettings {
   cv_coverage_target: string;
   cv_llm_provider: 'claude_code' | 'anthropic' | 'openai';
   cv_llm_model: string;
+  cv_pinned_projects: string;
+  cv_pinned_rank: 'true' | 'false';
   browser_channel: string;
   stop_before_submit: string;
   auto_continue: string;
@@ -83,6 +85,7 @@ export interface AgentHealth {
 
 export interface CvOptions {
   models: Record<string, string[]>;
+  projects: { title: string; group: 'selected' | 'additional' }[];
   status: {
     enabled: boolean;
     configured: boolean;

@@ -27,6 +27,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -150,6 +152,15 @@ function statusTone(status: ApplicationRun['status']) {
   if (status === 'failed') return 'border-red-400/30 bg-red-400/10 text-red-300';
   if (status === 'running') return 'border-cyan-400/30 bg-cyan-400/10 text-cyan-200';
   return 'border-border bg-muted text-muted-foreground';
+}
+
+function parsePinnedProjects(value: string | undefined) {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed.map((item) => String(item || '').trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
 }
 
 export default function Home() {
@@ -360,6 +371,8 @@ export default function Home() {
         cv_coverage_target: draftSettings.cv_coverage_target,
         cv_llm_provider: draftSettings.cv_llm_provider,
         cv_llm_model: draftSettings.cv_llm_model,
+        cv_pinned_projects: draftSettings.cv_pinned_projects,
+        cv_pinned_rank: draftSettings.cv_pinned_rank,
       });
       setSettings(saved);
       setDraftSettings(saved);
@@ -400,6 +413,14 @@ export default function Home() {
     const current = draftSettings?.cv_llm_model;
     return current && !models.includes(current) ? [current, ...models] : models;
   }, [cvOptions, draftSettings?.cv_llm_model, draftSettings?.cv_llm_provider]);
+  const pinnedProjects = useMemo(
+    () => parsePinnedProjects(draftSettings?.cv_pinned_projects),
+    [draftSettings?.cv_pinned_projects],
+  );
+  const setPinnedProjects = (titles: string[]) => {
+    if (!draftSettings) return;
+    setDraftSettings({ ...draftSettings, cv_pinned_projects: JSON.stringify(titles) });
+  };
 
   return (
     <main className="min-h-screen text-foreground">
@@ -708,6 +729,7 @@ export default function Home() {
               <SetupRow label="Master CV service" ready={Boolean(health?.cv_service)} detail="Shared data · Port 8400" />
               <SetupRow label="Form AI" ready={Boolean(health?.llm?.configured)} detail={settings?.llm_mode === 'claude_subscription' ? `Claude subscription · ${settings.llm_model}` : `Anthropic API · ${settings?.llm_model || ''}`} />
               <SetupRow label="CV model" ready={settings?.cv_use_llm === 'false' || Boolean(cvOptions?.status.configured)} detail={settings?.cv_use_llm === 'false' ? 'LLM polish off' : `${CV_PROVIDER_LABELS[settings?.cv_llm_provider || 'anthropic']} · ${settings?.cv_llm_model || ''}`} />
+              <SetupRow label="Projects" ready detail={parsePinnedProjects(settings?.cv_pinned_projects).length ? `${parsePinnedProjects(settings?.cv_pinned_projects).length} manually selected` : 'Automatic JD ranking'} />
               <SetupRow label="Final submission" ready detail="Always manual" />
             </CardContent>
           </Card>
@@ -870,6 +892,68 @@ export default function Home() {
                 </Select>
                 <p className="text-xs leading-5 text-muted-foreground">Minimum JD keyword coverage the polishing loop aims to reach.</p>
               </div>
+              <Collapsible defaultOpen className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.025]">
+                <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-3 text-left hover:bg-white/[0.035]">
+                  <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="text-sm font-medium">Projects · pick manually</span>
+                  <Badge variant="secondary" className="ml-auto">
+                    {pinnedProjects.length ? `${pinnedProjects.length} pinned` : 'Auto'}
+                  </Badge>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="space-y-3 border-t border-white/10 px-3 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        Pick projects to consider for the CV. With nothing selected, every project is ranked automatically against the JD.
+                      </p>
+                      {pinnedProjects.length > 0 && (
+                        <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setPinnedProjects([])}>
+                          Clear (auto)
+                        </Button>
+                      )}
+                    </div>
+                    {pinnedProjects.length > 0 && (
+                      <div className="rounded-lg border border-cyan-400/15 bg-cyan-400/[0.04] p-3">
+                        <SettingSwitch
+                          id="rank-picked-projects"
+                          label="Let the LLM rank & trim within my picks"
+                          description={draftSettings.cv_pinned_rank === 'true'
+                            ? 'Only these projects are considered; the JD ranker orders them and page fitting keeps the best. Recommended.'
+                            : 'Every selected project is forced into the CV in selection order, without ranking or trimming.'}
+                          checked={draftSettings.cv_pinned_rank === 'true'}
+                          onCheckedChange={(checked) => setDraftSettings({ ...draftSettings, cv_pinned_rank: checked ? 'true' : 'false' })}
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      {(cvOptions?.projects || []).map((project) => {
+                        const index = pinnedProjects.indexOf(project.title);
+                        const checked = index >= 0;
+                        return (
+                          <label key={`${project.group}-${project.title}`} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 hover:bg-white/[0.04]">
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(nextChecked) => setPinnedProjects(
+                                nextChecked
+                                  ? [...pinnedProjects, project.title]
+                                  : pinnedProjects.filter((title) => title !== project.title),
+                              )}
+                            />
+                            {checked && draftSettings.cv_pinned_rank === 'false' && (
+                              <span className="w-5 shrink-0 text-center text-xs font-semibold text-cyan-300">{index + 1}</span>
+                            )}
+                            <span className="min-w-0 flex-1 text-sm leading-5">{project.title}</span>
+                            <Badge variant="secondary" className="shrink-0 capitalize">{project.group}</Badge>
+                          </label>
+                        );
+                      })}
+                      {!cvOptions?.projects?.length && (
+                        <p className="py-4 text-center text-sm text-muted-foreground">Loading projects from Master CV…</p>
+                      )}
+                    </div>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
               <div className="space-y-2">
                 <label htmlFor="cv-api" className="text-sm font-medium">Master CV service</label>
                 <Input id="cv-api" value={draftSettings.cv_api_base} onChange={(event) => setDraftSettings({ ...draftSettings, cv_api_base: event.target.value })} />

@@ -54,5 +54,7 @@ shared, while runtime model selection stays isolated from the app on port 3300.
 Settings can be changed from the UI. Environment defaults are documented in
 `.env.example`. The CV section includes provider and model selection, target
 length (1, 1.5, 2 pages, or Auto), PDF compilation, LLM polishing, aggressive
-tailoring, and a keyword-coverage target. These settings are sent with every new
-CV render.
+tailoring, a keyword-coverage target, and manual project selection. Leaving all
+projects clear keeps automatic JD ranking; selected projects can either be
+ranked and trimmed by the LLM or forced into the CV in selection order. These
+settings are sent with every new CV render.

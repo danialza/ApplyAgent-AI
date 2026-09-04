@@ -201,6 +201,8 @@ const defaultSettings = {
   cv_coverage_target: process.env.CV_COVERAGE_TARGET || '0.95',
   cv_llm_provider: process.env.CV_LLM_PROVIDER || 'anthropic',
   cv_llm_model: process.env.CV_LLM_MODEL || 'claude-sonnet-5',
+  cv_pinned_projects: process.env.CV_PINNED_PROJECTS || '[]',
+  cv_pinned_rank: process.env.CV_PINNED_RANK || 'true',
   browser_channel: 'chrome',
   stop_before_submit: 'true',
   auto_continue: 'true',
@@ -218,7 +220,8 @@ export function saveSettings(patch) {
   const allowed = new Set([
     'cv_api_base', 'llm_mode', 'llm_model', 'cv_length', 'cv_compile_pdf',
     'cv_use_llm', 'cv_enhance_tailor', 'cv_coverage_target',
-    'cv_llm_provider', 'cv_llm_model', 'browser_channel', 'auto_continue',
+    'cv_llm_provider', 'cv_llm_model', 'cv_pinned_projects', 'cv_pinned_rank',
+    'browser_channel', 'auto_continue',
   ]);
   const upsert = sqlite.prepare(`
     INSERT INTO settings (setting_key, setting_value, updated_at)
