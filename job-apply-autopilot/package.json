@@ -13,6 +13,7 @@
     "cv-backend:stop": "docker compose -f ../docker-compose.rp-live.yml stop backend",
     "build": "vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
+    "test": "node --test agent/*.test.mjs",
     "lint": "oxlint app agent lib -A react/react-compiler",
     "format": "oxfmt",
     "db:generate": "drizzle-kit generate"

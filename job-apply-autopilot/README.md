@@ -43,6 +43,9 @@ shared, while runtime model selection stays isolated from the app on port 3300.
 - CAPTCHA, security checks, and login pages pause the run for the user.
 - Learned answers are stored locally in `.data/applypilot.sqlite` and mirrored to
   the existing CV service's facts store so both apps share them.
+- Expected annual salary is calculated per job rather than saved as a reusable
+  answer: 5% below the top of a posted range, or 6% below a role/location
+  estimate when the job does not publish a range.
 - Chrome sessions use `.data/chrome-profile`, so logins can persist locally.
 - Generated PDFs are kept under `outputs/`; both paths are excluded from Git.
 

@@ -31,7 +31,15 @@ import {
   saveSettings,
   updateRun,
 } from './db.mjs';
-import { checkLlm, mapUnknownFields } from './llm.mjs';
+import { checkLlm, estimateMarketSalary, mapUnknownFields } from './llm.mjs';
+import {
+  applySalaryPolicy,
+  displaySalary,
+  fallbackMarketSalary,
+  isExpectedAnnualSalaryControl,
+  postedSalaryHigh,
+  salaryValueForControl,
+} from './salary.mjs';
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const outputsRoot = join(projectRoot, 'outputs');
@@ -39,6 +47,7 @@ mkdirSync(outputsRoot, { recursive: true });
 
 const subscribers = new Map();
 const processing = new Set();
+const salaryEstimates = new Map();
 let queue = Promise.resolve();
 let cvOptionsCache = null;
 
@@ -280,12 +289,65 @@ async function pauseForUserAction(runId, page, reason) {
   });
 }
 
-async function fillCurrentPage(runId, page, cvPath, known, settings) {
+async function expectedSalaryForRun(run, settings) {
+  const cached = salaryEstimates.get(run.id);
+  if (cached) return cached;
+
+  const posted = postedSalaryHigh(run.jd_text);
+  if (posted) {
+    const result = applySalaryPolicy(posted, 'posted');
+    salaryEstimates.set(run.id, result);
+    return result;
+  }
+
+  try {
+    const estimated = await estimateMarketSalary({
+      jobTitle: run.role,
+      jobText: run.jd_text,
+      settings,
+    });
+    if (estimated.postedHighSalary >= 10_000 && estimated.postedHighSalary <= 2_000_000) {
+      const result = applySalaryPolicy({ amount: estimated.postedHighSalary, currency: estimated.currency }, 'posted');
+      salaryEstimates.set(run.id, result);
+      return result;
+    }
+    if (estimated.marketAnnualSalary >= 10_000 && estimated.marketAnnualSalary <= 2_000_000) {
+      const result = applySalaryPolicy({ amount: estimated.marketAnnualSalary, currency: estimated.currency }, 'market');
+      salaryEstimates.set(run.id, result);
+      return result;
+    }
+  } catch {
+    // The deterministic role/location fallback below keeps salary fields automatic.
+  }
+
+  const result = applySalaryPolicy(fallbackMarketSalary({ jobTitle: run.role, jobText: run.jd_text }), 'market');
+  salaryEstimates.set(run.id, result);
+  return result;
+}
+
+async function fillCurrentPage(runId, page, cvPath, known, settings, run) {
   const controls = await collectControls(page);
   const editable = controls.filter((control) => !['hidden', 'submit', 'button', 'reset'].includes(control.type));
   const unresolved = [];
+  const needsSalary = editable.some((control) => !control.value && isExpectedAnnualSalaryControl(control));
+  const salary = needsSalary ? await expectedSalaryForRun(run, settings) : null;
+  let salaryAnnounced = false;
 
   for (const control of editable) {
+    if (salary && !control.value && isExpectedAnnualSalaryControl(control)) {
+      try {
+        await applyControl(page, control, 'fill', salaryValueForControl(control, salary.amount));
+        if (!salaryAnnounced) {
+          const basis = salary.source === 'posted' ? '5% below the posted maximum' : '6% below the role estimate';
+          emit(runId, 'filling_form', 'running', `Expected salary: ${displaySalary(salary)}`, basis);
+          salaryAnnounced = true;
+        }
+        continue;
+      } catch {
+        unresolved.push(control);
+        continue;
+      }
+    }
     const decision = candidateValue(control, known, cvPath);
     if (decision?.value || decision?.action === 'skip') {
       if (decision.action !== 'skip') {
@@ -415,7 +477,7 @@ async function processRun(runId) {
 
       emit(runId, 'filling_form', 'running', `Filling application page ${step + 1}`, '', { progress: Math.min(92, 72 + step * 3) });
       const { known } = await loadCandidate(settings);
-      const filled = await fillCurrentPage(runId, page, getRun(runId).cv_path, known, settings);
+      const filled = await fillCurrentPage(runId, page, getRun(runId).cv_path, known, settings, latest);
       if (filled.questions.length) {
         replacePendingQuestions(runId, filled.questions);
         emit(runId, 'needs_input', 'waiting', `I need ${filled.questions.length} answer${filled.questions.length === 1 ? '' : 's'} before continuing`, '', {
