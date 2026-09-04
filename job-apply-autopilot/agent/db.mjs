@@ -191,10 +191,16 @@ export function memoryMap() {
 }
 
 const defaultSettings = {
-  cv_api_base: process.env.CV_API_BASE || 'http://127.0.0.1:8300',
+  cv_api_base: process.env.CV_API_BASE || 'http://127.0.0.1:8400',
   llm_mode: process.env.LLM_MODE || 'claude_subscription',
   llm_model: process.env.LLM_MODEL || 'sonnet',
   cv_length: process.env.CV_LENGTH || 'auto',
+  cv_compile_pdf: process.env.CV_COMPILE_PDF || 'true',
+  cv_use_llm: process.env.CV_USE_LLM || 'true',
+  cv_enhance_tailor: process.env.CV_ENHANCE_TAILOR || 'true',
+  cv_coverage_target: process.env.CV_COVERAGE_TARGET || '0.95',
+  cv_llm_provider: process.env.CV_LLM_PROVIDER || 'anthropic',
+  cv_llm_model: process.env.CV_LLM_MODEL || 'claude-sonnet-5',
   browser_channel: 'chrome',
   stop_before_submit: 'true',
   auto_continue: 'true',
@@ -209,7 +215,11 @@ export function getSettings() {
 }
 
 export function saveSettings(patch) {
-  const allowed = new Set(['cv_api_base', 'llm_mode', 'llm_model', 'cv_length', 'browser_channel', 'auto_continue']);
+  const allowed = new Set([
+    'cv_api_base', 'llm_mode', 'llm_model', 'cv_length', 'cv_compile_pdf',
+    'cv_use_llm', 'cv_enhance_tailor', 'cv_coverage_target',
+    'cv_llm_provider', 'cv_llm_model', 'browser_channel', 'auto_continue',
+  ]);
   const upsert = sqlite.prepare(`
     INSERT INTO settings (setting_key, setting_value, updated_at)
     VALUES (?, ?, ?)

@@ -31,6 +31,7 @@ import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -52,11 +53,13 @@ import {
   AgentHealth,
   AgentSettings,
   ApplicationRun,
+  CvOptions,
   MemoryFact,
   answerQuestions,
   createRun,
   cvUrl,
   fetchHealth,
+  fetchCvOptions,
   fetchMemory,
   fetchRun,
   fetchRuns,
@@ -95,6 +98,18 @@ const STATUS_LABELS: Record<string, string> = {
   ready_for_review: 'Ready to review',
   failed: 'Failed',
   cancelled: 'Cancelled',
+};
+
+const CV_PROVIDER_LABELS: Record<AgentSettings['cv_llm_provider'], string> = {
+  claude_code: 'Claude subscription',
+  anthropic: 'Anthropic API',
+  openai: 'OpenAI API',
+};
+
+const CV_MODEL_FALLBACKS: Record<AgentSettings['cv_llm_provider'], string[]> = {
+  claude_code: ['sonnet', 'opus', 'haiku'],
+  anthropic: ['claude-sonnet-5', 'claude-opus-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+  openai: ['gpt-5', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini'],
 };
 
 type ModelContextTool = {
@@ -145,6 +160,7 @@ export default function Home() {
   const [memory, setMemory] = useState<MemoryFact[]>([]);
   const [settings, setSettings] = useState<AgentSettings | null>(null);
   const [draftSettings, setDraftSettings] = useState<AgentSettings | null>(null);
+  const [cvOptions, setCvOptions] = useState<CvOptions | null>(null);
   const [url, setUrl] = useState('');
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [starting, setStarting] = useState(false);
@@ -184,7 +200,13 @@ export default function Home() {
         setDraftSettings(nextSettings);
       })
       .catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not connect to the local agent.'));
+    fetchCvOptions().then(setCvOptions).catch(() => undefined);
   }, [loadRuns, refreshSideData]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    fetchCvOptions().then(setCvOptions).catch(() => undefined);
+  }, [settingsOpen]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -332,6 +354,12 @@ export default function Home() {
         llm_mode: draftSettings.llm_mode,
         llm_model: draftSettings.llm_model,
         cv_length: draftSettings.cv_length,
+        cv_compile_pdf: draftSettings.cv_compile_pdf,
+        cv_use_llm: draftSettings.cv_use_llm,
+        cv_enhance_tailor: draftSettings.cv_enhance_tailor,
+        cv_coverage_target: draftSettings.cv_coverage_target,
+        cv_llm_provider: draftSettings.cv_llm_provider,
+        cv_llm_model: draftSettings.cv_llm_model,
       });
       setSettings(saved);
       setDraftSettings(saved);
@@ -360,6 +388,18 @@ export default function Home() {
     for (const event of selected?.events || []) result.set(event.stage, event.message);
     return result;
   }, [selected?.events]);
+  const availableCvProviders = useMemo(() => {
+    const available = cvOptions?.status.available_providers || [];
+    const current = draftSettings?.cv_llm_provider;
+    const values = available.length ? available : current ? [current] : ['anthropic'];
+    return values.filter((provider): provider is AgentSettings['cv_llm_provider'] => provider in CV_PROVIDER_LABELS);
+  }, [cvOptions, draftSettings?.cv_llm_provider]);
+  const availableCvModels = useMemo(() => {
+    const provider = draftSettings?.cv_llm_provider || 'anthropic';
+    const models = cvOptions?.models[provider] || CV_MODEL_FALLBACKS[provider];
+    const current = draftSettings?.cv_llm_model;
+    return current && !models.includes(current) ? [current, ...models] : models;
+  }, [cvOptions, draftSettings?.cv_llm_model, draftSettings?.cv_llm_provider]);
 
   return (
     <main className="min-h-screen text-foreground">
@@ -665,8 +705,9 @@ export default function Home() {
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <SetupRow label="Application agent" ready={Boolean(health?.agent)} detail="Port 8500" />
-              <SetupRow label="Master CV service" ready={Boolean(health?.cv_service)} detail="Port 8300" />
-              <SetupRow label="AI model" ready={Boolean(health?.llm?.configured)} detail={settings?.llm_mode === 'claude_subscription' ? `Claude subscription · ${settings.llm_model}` : `Anthropic API · ${settings?.llm_model || ''}`} />
+              <SetupRow label="Master CV service" ready={Boolean(health?.cv_service)} detail="Shared data · Port 8400" />
+              <SetupRow label="Form AI" ready={Boolean(health?.llm?.configured)} detail={settings?.llm_mode === 'claude_subscription' ? `Claude subscription · ${settings.llm_model}` : `Anthropic API · ${settings?.llm_model || ''}`} />
+              <SetupRow label="CV model" ready={settings?.cv_use_llm === 'false' || Boolean(cvOptions?.status.configured)} detail={settings?.cv_use_llm === 'false' ? 'LLM polish off' : `${CV_PROVIDER_LABELS[settings?.cv_llm_provider || 'anthropic']} · ${settings?.cv_llm_model || ''}`} />
               <SetupRow label="Final submission" ready detail="Always manual" />
             </CardContent>
           </Card>
@@ -704,15 +745,19 @@ export default function Home() {
       </div>
 
       <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <SheetContent className="border-white/10 bg-card sm:max-w-md">
+        <SheetContent className="border-white/10 bg-card sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>ApplyPilot settings</SheetTitle>
             <SheetDescription>Changes apply to the next application run.</SheetDescription>
           </SheetHeader>
           {draftSettings && (
-            <div className="space-y-5 overflow-y-auto px-4">
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-4">
+              <div>
+                <h3 className="text-sm font-semibold">Application form AI</h3>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">Used to understand and fill fields on application pages.</p>
+              </div>
               <div className="space-y-2">
-                <label htmlFor="llm-mode" className="text-sm font-medium">AI connection</label>
+                <label htmlFor="llm-mode" className="text-sm font-medium">Connection</label>
                 <Select value={draftSettings.llm_mode} onValueChange={(value) => setDraftSettings({ ...draftSettings, llm_mode: value as AgentSettings['llm_mode'] })}>
                   <SelectTrigger id="llm-mode" className="h-10 w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -725,20 +770,105 @@ export default function Home() {
                 </p>
               </div>
               <div className="space-y-2">
-                <label htmlFor="model" className="text-sm font-medium">Model</label>
+                <label htmlFor="model" className="text-sm font-medium">Form model</label>
                 <Input id="model" value={draftSettings.llm_model} onChange={(event) => setDraftSettings({ ...draftSettings, llm_model: event.target.value })} />
               </div>
+              <Separator />
+              <div>
+                <h3 className="text-sm font-semibold">CV generation</h3>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">These controls are sent to the CV renderer for every new application.</p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label htmlFor="cv-provider" className="text-sm font-medium">CV provider</label>
+                  <Select
+                    value={draftSettings.cv_llm_provider}
+                    disabled={draftSettings.cv_use_llm === 'false'}
+                    onValueChange={(value) => {
+                      const provider = value as AgentSettings['cv_llm_provider'];
+                      setDraftSettings({
+                        ...draftSettings,
+                        cv_llm_provider: provider,
+                        cv_llm_model: (cvOptions?.models[provider] || CV_MODEL_FALLBACKS[provider])[0],
+                      });
+                    }}
+                  >
+                    <SelectTrigger id="cv-provider" className="h-10 w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {availableCvProviders.map((provider) => <SelectItem key={provider} value={provider}>{CV_PROVIDER_LABELS[provider]}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="cv-model" className="text-sm font-medium">CV model</label>
+                  <Select
+                    value={draftSettings.cv_llm_model}
+                    disabled={draftSettings.cv_use_llm === 'false'}
+                    onValueChange={(value) => value && setDraftSettings({ ...draftSettings, cv_llm_model: value })}
+                  >
+                    <SelectTrigger id="cv-model" className="h-10 w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {availableCvModels.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
               <div className="space-y-2">
-                <label htmlFor="cv-length" className="text-sm font-medium">CV length</label>
+                <label htmlFor="cv-length" className="text-sm font-medium">Target length</label>
                 <Select value={draftSettings.cv_length} onValueChange={(value) => setDraftSettings({ ...draftSettings, cv_length: value as AgentSettings['cv_length'] })}>
                   <SelectTrigger id="cv-length" className="h-10 w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="auto">Automatic for each role</SelectItem>
-                    <SelectItem value="one_page">One page</SelectItem>
-                    <SelectItem value="one_half_page">One to two pages, concise</SelectItem>
-                    <SelectItem value="two_page">Up to two pages</SelectItem>
+                    <SelectItem value="one_page">1 page</SelectItem>
+                    <SelectItem value="one_half_page">1.5 pages</SelectItem>
+                    <SelectItem value="two_page">2 pages</SelectItem>
+                    <SelectItem value="auto">Auto (LLM)</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-3 rounded-xl border border-white/10 bg-white/[0.025] p-3">
+                <SettingSwitch
+                  id="compile-pdf"
+                  label="Compile PDF"
+                  description="Required for automatic upload; uses Tectonic in the CV container."
+                  checked={draftSettings.cv_compile_pdf === 'true'}
+                  onCheckedChange={(checked) => setDraftSettings({ ...draftSettings, cv_compile_pdf: checked ? 'true' : 'false' })}
+                />
+                <Separator />
+                <SettingSwitch
+                  id="polish-llm"
+                  label="Polish with LLM"
+                  description="Rewrites the summary and bullets for the job description."
+                  checked={draftSettings.cv_use_llm === 'true'}
+                  onCheckedChange={(checked) => setDraftSettings({
+                    ...draftSettings,
+                    cv_use_llm: checked ? 'true' : 'false',
+                    cv_enhance_tailor: checked ? draftSettings.cv_enhance_tailor : 'false',
+                  })}
+                />
+                <Separator />
+                <SettingSwitch
+                  id="aggressive-tailor"
+                  label="Aggressive tailor"
+                  description="May add plausible JD-relevant details while preserving project, company, and role names."
+                  checked={draftSettings.cv_enhance_tailor === 'true'}
+                  disabled={draftSettings.cv_use_llm === 'false'}
+                  onCheckedChange={(checked) => setDraftSettings({ ...draftSettings, cv_enhance_tailor: checked ? 'true' : 'false' })}
+                />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="coverage-target" className="text-sm font-medium">Coverage target</label>
+                <Select value={draftSettings.cv_coverage_target} disabled={draftSettings.cv_use_llm === 'false'} onValueChange={(value) => value && setDraftSettings({ ...draftSettings, cv_coverage_target: value })}>
+                  <SelectTrigger id="coverage-target" className="h-10 w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">Off</SelectItem>
+                    <SelectItem value="0.6">60%</SelectItem>
+                    <SelectItem value="0.7">70%</SelectItem>
+                    <SelectItem value="0.8">80%</SelectItem>
+                    <SelectItem value="0.9">90%</SelectItem>
+                    <SelectItem value="0.95">95%</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs leading-5 text-muted-foreground">Minimum JD keyword coverage the polishing loop aims to reach.</p>
               </div>
               <div className="space-y-2">
                 <label htmlFor="cv-api" className="text-sm font-medium">Master CV service</label>
@@ -798,6 +928,32 @@ function SetupRow({ label, ready, detail }: { label: string; ready: boolean; det
         <div className="font-medium">{label}</div>
         <div className="truncate text-xs text-muted-foreground">{detail}</div>
       </div>
+    </div>
+  );
+}
+
+function SettingSwitch({
+  id,
+  label,
+  description,
+  checked,
+  disabled = false,
+  onCheckedChange,
+}: {
+  id: string;
+  label: string;
+  description: string;
+  checked: boolean;
+  disabled?: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <label htmlFor={id} className={cn('min-w-0 cursor-pointer', disabled && 'cursor-not-allowed opacity-50')}>
+        <span className="block text-sm font-medium">{label}</span>
+        <span className="mt-1 block text-xs leading-5 text-muted-foreground">{description}</span>
+      </label>
+      <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} className="mt-1" />
     </div>
   );
 }

@@ -9,6 +9,8 @@
     "dev": "vinext dev --port 3500 --host 127.0.0.1",
     "agent": "node --env-file-if-exists=../.env --env-file-if-exists=.env --disable-warning=ExperimentalWarning agent/server.mjs",
     "dev:all": "concurrently -k -n UI,AGENT -c cyan,green \"npm:dev\" \"npm:agent\"",
+    "cv-backend:up": "docker compose -f ../docker-compose.rp-live.yml up -d --build backend",
+    "cv-backend:stop": "docker compose -f ../docker-compose.rp-live.yml stop backend",
     "build": "vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint app agent lib -A react/react-compiler",

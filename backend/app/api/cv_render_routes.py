@@ -658,6 +658,40 @@ def list_llm_models() -> dict:
     return _KNOWN_MODELS
 
 
+@router.post("/llm-config")
+def set_llm_config(payload: dict) -> dict:
+    """Set the provider and model atomically without making a test LLM call.
+
+    ApplyPilot calls this immediately before a CV render. Keeping the update in
+    one request prevents a render from briefly seeing a new provider with the
+    previous provider's model.
+    """
+    import os as _os
+    from app.services import llm_extraction_service as llm
+
+    provider = str((payload or {}).get("provider", "")).strip().lower()
+    model = str((payload or {}).get("model", "")).strip()
+    if provider not in {"claude_code", "anthropic", "openai"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"provider must be one of: claude_code, anthropic, openai (got {provider!r}).",
+        )
+    if not model:
+        raise HTTPException(status_code=400, detail="model required.")
+
+    _os.environ["LLM_PROVIDER"] = provider
+    if provider == "openai":
+        _os.environ["LLM_MODEL_NAME"] = model
+    else:
+        _os.environ["ANTHROPIC_MODEL"] = model
+
+    return {
+        "provider": provider,
+        "model": model,
+        "enabled": llm.is_enabled(),
+    }
+
+
 @router.post("/llm-provider")
 def set_llm_provider(payload: dict) -> dict:
     """Switch the active LLM provider at runtime.

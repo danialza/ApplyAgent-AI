@@ -6,6 +6,7 @@ import { closeDatabase } from './db.mjs';
 import {
   answerAndResume,
   cancelRun,
+  cvOptions,
   deleteMemory,
   focusBrowser,
   getMemory,
@@ -46,6 +47,7 @@ app.get('/api/health', asyncRoute(async (_request, response) => {
 
 app.get('/api/settings', (_request, response) => response.json(settings()));
 app.put('/api/settings', (request, response) => response.json(updateSettings(request.body || {})));
+app.get('/api/cv-options', asyncRoute(async (_request, response) => response.json(await cvOptions())));
 
 app.get('/api/runs', (_request, response) => response.json(getPublicRuns()));
 app.post('/api/runs', (request, response) => {

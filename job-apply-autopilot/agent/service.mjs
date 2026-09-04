@@ -40,6 +40,7 @@ mkdirSync(outputsRoot, { recursive: true });
 const subscribers = new Map();
 const processing = new Set();
 let queue = Promise.resolve();
+let cvOptionsCache = null;
 
 const stageProgress = {
   queued: 2,
@@ -76,6 +77,17 @@ async function requestJson(url, options = {}, timeoutMs = 120_000) {
   try { body = text ? JSON.parse(text) : {}; } catch { body = { detail: text.slice(0, 800) }; }
   if (!response.ok) throw new Error(body?.detail || `${response.status} ${response.statusText}`);
   return body;
+}
+
+function parseBoolean(value, fallback = true) {
+  if (value === undefined || value === null || value === '') return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
+function coverageTarget(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0.95;
+  return Math.max(0, Math.min(parsed, 1));
 }
 
 const normalise = (value) => String(value || '')
@@ -195,6 +207,21 @@ async function streamCvProgress(base, progressId, runId) {
 
 async function renderCv(runId, jdText, settings) {
   const base = settings.cv_api_base.replace(/\/$/, '');
+  const useLlm = parseBoolean(settings.cv_use_llm);
+  const compilePdf = parseBoolean(settings.cv_compile_pdf);
+  const enhanceTailor = useLlm && parseBoolean(settings.cv_enhance_tailor);
+
+  if (useLlm) {
+    await requestJson(`${base}/api/cv/llm-config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: settings.cv_llm_provider || 'anthropic',
+        model: settings.cv_llm_model || 'claude-sonnet-5',
+      }),
+    }, 20_000);
+  }
+
   const progressId = `applypilot-${runId}`;
   const progressTask = streamCvProgress(base, progressId, runId);
   const result = await requestJson(`${base}/api/cv/render`, {
@@ -202,15 +229,18 @@ async function renderCv(runId, jdText, settings) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       job_text: jdText,
-      compile_pdf: true,
-      use_llm: true,
-      enhance_tailor: true,
+      compile_pdf: compilePdf,
+      use_llm: useLlm,
+      enhance_tailor: enhanceTailor,
       target_length: settings.cv_length || 'auto',
-      target_keyword_coverage: 0.95,
+      target_keyword_coverage: coverageTarget(settings.cv_coverage_target),
       progress_id: progressId,
     }),
   }, 1_200_000);
   await Promise.race([progressTask, new Promise((resolve) => setTimeout(resolve, 1000))]);
+  if (!compilePdf) {
+    throw new Error('The CV source was generated, but an application needs a PDF upload. Turn on Compile PDF and retry.');
+  }
   if (!result.compiled || !result.pdf_b64) throw new Error(result.compile_error || 'CV PDF compilation failed.');
   const runDir = join(outputsRoot, runId);
   mkdirSync(runDir, { recursive: true });
@@ -526,8 +556,23 @@ export async function deleteMemory(key) {
   return deleted || response?.ok || false;
 }
 export function settings() { return getSettings(); }
-export function updateSettings(patch) { return saveSettings(patch); }
+export function updateSettings(patch) {
+  cvOptionsCache = null;
+  return saveSettings(patch);
+}
 export function llmStatus() { return checkLlm(getSettings()); }
+export async function cvOptions() {
+  const now = Date.now();
+  if (cvOptionsCache && now - cvOptionsCache.at < 60_000) return cvOptionsCache.value;
+  const base = getSettings().cv_api_base.replace(/\/$/, '');
+  const [models, status] = await Promise.all([
+    requestJson(`${base}/api/cv/llm-models`, {}, 20_000),
+    requestJson(`${base}/api/cv/llm-status`, {}, 30_000),
+  ]);
+  const value = { models, status };
+  cvOptionsCache = { at: now, value };
+  return value;
+}
 export function readCv(runId) {
   const run = getRun(runId);
   if (!run?.cv_path) return null;

@@ -55,6 +55,12 @@ export interface AgentSettings {
   llm_mode: 'claude_subscription' | 'anthropic_api';
   llm_model: string;
   cv_length: 'auto' | 'one_page' | 'one_half_page' | 'two_page';
+  cv_compile_pdf: 'true' | 'false';
+  cv_use_llm: 'true' | 'false';
+  cv_enhance_tailor: 'true' | 'false';
+  cv_coverage_target: string;
+  cv_llm_provider: 'claude_code' | 'anthropic' | 'openai';
+  cv_llm_model: string;
   browser_channel: string;
   stop_before_submit: string;
   auto_continue: string;
@@ -73,6 +79,19 @@ export interface AgentHealth {
   agent: boolean;
   cv_service: boolean;
   llm: { mode: string; configured: boolean; model: string; fallback?: string };
+}
+
+export interface CvOptions {
+  models: Record<string, string[]>;
+  status: {
+    enabled: boolean;
+    configured: boolean;
+    reachable: boolean;
+    provider: string;
+    model: string;
+    available_providers: string[];
+    error: string;
+  };
 }
 
 async function handle<T>(response: Response): Promise<T> {
@@ -118,6 +137,10 @@ export async function runAction(runId: string, action: 'resume' | 'cancel' | 'fo
 
 export async function fetchSettings(): Promise<AgentSettings> {
   return handle(await fetch(`${AGENT_BASE}/api/settings`, { cache: 'no-store' }));
+}
+
+export async function fetchCvOptions(): Promise<CvOptions> {
+  return handle(await fetch(`${AGENT_BASE}/api/cv-options`, { cache: 'no-store' }));
 }
 
 export async function putSettings(settings: Partial<AgentSettings>): Promise<AgentSettings> {
